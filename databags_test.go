@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestDataBagItem_ID(t *testing.T) {

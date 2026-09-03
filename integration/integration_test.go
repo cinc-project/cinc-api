@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	cinc "github.com/tas50/cinc-api"
+	cinc "github.com/cinc-project/cinc-api"
 	"github.com/tas50/cinc-zero/server"
 )
 

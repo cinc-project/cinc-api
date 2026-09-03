@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tas50/cinc-api/internal/signing"
+	"github.com/cinc-project/cinc-api/internal/signing"
 )
 
 // doRaw sends a signed request and returns the raw response body.

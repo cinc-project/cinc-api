@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestSearch_Query(t *testing.T) {

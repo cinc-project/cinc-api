@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 // TestNodes_Errors covers the error paths for the Nodes service.

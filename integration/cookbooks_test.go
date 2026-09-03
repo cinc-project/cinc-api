@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cinc "github.com/tas50/cinc-api"
+	cinc "github.com/cinc-project/cinc-api"
 )
 
 // TestIntegration_CookbookUploadDownload drives the full three-step cookbook

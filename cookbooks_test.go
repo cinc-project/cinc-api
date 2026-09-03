@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestCookbooks_GetVersions(t *testing.T) {

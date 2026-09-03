@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/signing"
+	"github.com/cinc-project/cinc-api/internal/signing"
 )
 
 // collectAuthSig reassembles the X-Ops-Authorization-N chunks from an HTTP

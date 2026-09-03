@@ -4,7 +4,7 @@ A modern, idiomatic Go client for the Chef Infra / CINC Server API.
 
 ## Install
 
-    go get github.com/tas50/cinc-api
+    go get github.com/cinc-project/cinc-api
 
 ## Usage
 

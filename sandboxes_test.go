@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 // TestSandbox_ChecksumNullValues asserts that the POST /sandboxes request body
