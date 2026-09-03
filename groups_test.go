@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestGroups_ListAndGet(t *testing.T) {

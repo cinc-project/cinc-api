@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestACLs_Get(t *testing.T) {

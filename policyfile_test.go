@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestParsePolicyfileLock(t *testing.T) {

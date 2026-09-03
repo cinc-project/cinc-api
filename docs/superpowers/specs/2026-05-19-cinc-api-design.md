@@ -1,7 +1,7 @@
 # cinc-api — Go client for the Chef/CINC Server API
 
 **Date:** 2026-05-19
-**Module:** `github.com/tas50/cinc-api`
+**Module:** `github.com/cinc-project/cinc-api`
 **Root package:** `cinc`
 
 ## Goal
@@ -42,7 +42,7 @@ cinc-api/
   testdata/            JSON fixtures, sample keys, sample cookbooks
 ```
 
-Module path `github.com/tas50/cinc-api`; Go 1.26.
+Module path `github.com/cinc-project/cinc-api`; Go 1.26.
 
 ## Client construction
 

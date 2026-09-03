@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 type widget struct {

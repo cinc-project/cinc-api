@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tas50/cinc-api/internal/cinctest"
+	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
 func TestStatus_Get(t *testing.T) {
