@@ -108,8 +108,15 @@ func (a *ACL) ACEFor(perm string) (*ACE, error) {
 	case "grant":
 		return &a.Grant, nil
 	default:
-		return nil, fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, or grant", perm)
+		return nil, errUnknownPerm(perm)
 	}
+}
+
+// errUnknownPerm is the error for a permission that is not one of the five the
+// server serves an endpoint for. "all" is a pseudo-permission understood only
+// by ExpandPerm, so it lands here too.
+func errUnknownPerm(perm string) error {
+	return fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, or grant (expand %q with ExpandPerm)", perm, "all")
 }
 
 // ACLsService accesses the per-object ACL endpoints. Every Chef object that
@@ -130,6 +137,10 @@ func (s *ACLsService) Get(ctx context.Context, objectType, name string) (*ACL, *
 // SetPermission rewrites one permission's ACE on one object. The Chef API
 // requires the request body to wrap the new ACE under the permission name,
 // e.g. {"update":{"actors":[],"groups":["admins"]}}.
+//
+// perm must be one of the five standard permissions. The pseudo-permission
+// "all" is rejected: it has no endpoint, so callers expand it with ExpandPerm
+// and set each resulting permission.
 //
 // Nil Actors/Groups slices are coerced to empty arrays so the server does
 // not reject the request for a null member list.
@@ -168,6 +179,9 @@ func (s *ACLsService) getACL(ctx context.Context, base string) (*ACL, *Response,
 
 // setACL rewrites one permission's ACE on the object whose path is base.
 func (s *ACLsService) setACL(ctx context.Context, base, perm string, ace *ACE) error {
+	if !slices.Contains(ACLPerms, perm) {
+		return errUnknownPerm(perm)
+	}
 	body := map[string]any{
 		perm: map[string]any{
 			"actors": nonNil(ace.Actors),

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -269,5 +270,49 @@ func TestACLs_GetNotFound(t *testing.T) {
 	c := newTestClient(t, srv.Server)
 	if _, _, err := c.ACLs.Get(context.Background(), "nodes", "missing"); err == nil {
 		t.Fatal("expected 404")
+	}
+}
+
+// "all" is a pseudo-permission for ExpandPerm, not an endpoint. Sending it
+// produced PUT .../_acl/all, which is not a thing the server serves.
+func TestSetPermission_RejectsInvalidPerm(t *testing.T) {
+	for _, perm := range []string{"all", "", "READ", "destroy"} {
+		t.Run(perm, func(t *testing.T) {
+			srv := cinctest.New(t) // any request fails the test: no routes registered
+			c := newTestClient(t, srv.Server)
+			err := c.ACLs.SetPermission(context.Background(), "nodes", "n1", perm,
+				&ACE{Groups: []string{"admins"}})
+			if err == nil {
+				t.Fatalf("SetPermission(%q) returned nil error", perm)
+			}
+			if !strings.Contains(err.Error(), "unknown permission") {
+				t.Errorf("err = %v, want an unknown-permission error", err)
+			}
+		})
+	}
+}
+
+func TestSetOrgAndUserPermission_RejectInvalidPerm(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	if err := c.ACLs.SetOrgPermission(context.Background(), "all", &ACE{}); err == nil {
+		t.Error("SetOrgPermission(\"all\") returned nil error")
+	}
+	if err := c.ACLs.SetUserPermission(context.Background(), "u", "all", &ACE{}); err == nil {
+		t.Error("SetUserPermission(\"all\") returned nil error")
+	}
+}
+
+// Every standard permission is still accepted.
+func TestSetPermission_AcceptsEveryStandardPerm(t *testing.T) {
+	for _, perm := range ACLPerms {
+		t.Run(perm, func(t *testing.T) {
+			srv := cinctest.New(t)
+			srv.Handle("PUT /organizations/o/nodes/n1/_acl/"+perm, cinctest.Route{Body: `{}`})
+			c := newTestClient(t, srv.Server)
+			if err := c.ACLs.SetPermission(context.Background(), "nodes", "n1", perm, &ACE{}); err != nil {
+				t.Errorf("SetPermission(%q): %v", perm, err)
+			}
+		})
 	}
 }
