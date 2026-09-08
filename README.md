@@ -93,4 +93,4 @@ model, so callers don't re-encode server conventions:
 
 ## License
 
-See LICENSE.
+Licensed under the [Apache License 2.0](LICENSE).
