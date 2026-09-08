@@ -28,6 +28,12 @@ func (e *ErrorResponse) Error() string {
 	if msg == "" {
 		msg = "(no message)"
 	}
+	// A 401 is nearly always a bad key or a skewed clock, and the server's own
+	// message rarely says so. The hint belongs here rather than in Messages,
+	// which reports what the server said.
+	if e.StatusCode == 401 {
+		msg += " (check the client key and that the local clock is in sync)"
+	}
 	return fmt.Sprintf("cinc: %s %s: %d: %s", e.Method, e.Path, e.StatusCode, msg)
 }
 
@@ -67,10 +73,6 @@ func newErrorResponse(method, path string, code int, body []byte) *ErrorResponse
 	}
 	if len(er.Messages) == 0 && len(body) > 0 {
 		er.Messages = []string{strings.TrimSpace(string(body))}
-	}
-	if code == 401 {
-		er.Messages = append(er.Messages,
-			"(check the client key and that the local clock is in sync)")
 	}
 	return er
 }
