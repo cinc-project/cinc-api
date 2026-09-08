@@ -8,12 +8,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cinc-project/cinc-api/internal/signing"
 )
@@ -370,7 +372,7 @@ func TestDo_EmptyBodyOK(t *testing.T) {
 	}
 }
 
-func TestIsNetErr(t *testing.T) {
+func TestIsRetriable(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -379,12 +381,17 @@ func TestIsNetErr(t *testing.T) {
 		{"nil", nil, false},
 		{"canceled", context.Canceled, false},
 		{"deadline", context.DeadlineExceeded, false},
-		{"other", errors.New("connection refused"), true},
+		// A bare error is not a wire failure: doOnce marks the ones that are.
+		{"unmarked", errors.New("connection refused"), false},
+		{"client_side", fmt.Errorf("cinc: build request: %w", errors.New("bad URL")), false},
+		{"wire", &transportErr{errors.New("connection refused")}, true},
+		{"wire_wrapped", fmt.Errorf("outer: %w", &transportErr{errors.New("reset by peer")}), true},
+		{"wire_but_canceled", &transportErr{fmt.Errorf("get: %w", context.Canceled)}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isNetErr(tc.err); got != tc.want {
-				t.Errorf("isNetErr(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := isRetriable(tc.err); got != tc.want {
+				t.Errorf("isRetriable(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -418,5 +425,92 @@ func TestDo_NetworkErrorRetried(t *testing.T) {
 	_, _, err = do[obj](context.Background(), c, "GET", "/x", nil)
 	if err == nil {
 		t.Fatal("expected error from dead server")
+	}
+}
+
+// recordSleeps replaces the client's backoff with a recorder, so retry timing
+// is asserted without the tests actually waiting.
+func recordSleeps(c *Client) *[]time.Duration {
+	var got []time.Duration
+	c.sleep = func(_ context.Context, d time.Duration) bool {
+		got = append(got, d)
+		return true
+	}
+	return &got
+}
+
+// A 5xx is retried, and the client waits longer before each attempt rather
+// than firing every attempt inside the same microsecond.
+func TestRetry_BacksOffBetweenAttempts(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	sleeps := recordSleeps(c)
+
+	if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+		t.Fatal("want an error from a persistent 500")
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Errorf("attempts = %d, want 3 (initial + 2 retries)", got)
+	}
+	if len(*sleeps) != 2 {
+		t.Fatalf("backoffs = %v, want 2", *sleeps)
+	}
+	if (*sleeps)[0] <= 0 || (*sleeps)[1] <= (*sleeps)[0] {
+		t.Errorf("backoffs = %v, want increasing and positive", *sleeps)
+	}
+}
+
+// A client-side failure - an unbuildable request, a signing error - will fail
+// identically every time. Repeating it is pure waste.
+func TestRetry_DoesNotRepeatClientSideErrors(t *testing.T) {
+	c := newTestClient(t, httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{}`)) })))
+	sleeps := recordSleeps(c)
+
+	_, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/\x7f", nil)
+	if err == nil {
+		t.Fatal("want a build-request error")
+	}
+	if len(*sleeps) != 0 {
+		t.Errorf("retried a client-side error %d times: %v", len(*sleeps), *sleeps)
+	}
+}
+
+// A genuine network failure is still retried.
+func TestRetry_StillRetriesNetworkErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{}`)) }))
+	srv.Close() // nothing is listening: every attempt is a connection failure
+	c := newTestClient(t, srv)
+	sleeps := recordSleeps(c)
+
+	if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+		t.Fatal("want a connection error")
+	}
+	if len(*sleeps) != 2 {
+		t.Errorf("backoffs = %v, want 2", *sleeps)
+	}
+}
+
+// Cancelling during a backoff must abandon the retry immediately.
+func TestRetry_BackoffHonoursContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	c.sleep = func(context.Context, time.Duration) bool { return false } // cancelled mid-wait
+
+	start := time.Now()
+	if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+		t.Fatal("want the 503 error")
+	}
+	if time.Since(start) > time.Second {
+		t.Error("did not abandon the retry promptly")
 	}
 }
