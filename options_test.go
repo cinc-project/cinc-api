@@ -4,6 +4,7 @@ package cinc
 import (
 	"crypto/rsa"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"testing"
 	"time"
@@ -140,5 +141,42 @@ func TestDefaultOptions(t *testing.T) {
 	}
 	if o.maxRetries < 1 {
 		t.Errorf("default maxRetries = %d, want >= 1", o.maxRetries)
+	}
+}
+
+// WithSkipTLSVerify has to rebuild the transport, but it must not throw away
+// the rest of the caller's client while doing it.
+func TestWithSkipTLSVerify_PreservesClientConfig(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom := &http.Client{
+		Timeout:       9 * time.Second,
+		Jar:           jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	c, err := NewClient(
+		Config{ServerURL: "https://h", Org: "o", ClientName: "c", Key: testRSAKey(t)},
+		WithHTTPClient(custom), WithSkipTLSVerify(true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.httpClient.CheckRedirect == nil {
+		t.Error("CheckRedirect was dropped")
+	}
+	if c.httpClient.Jar != jar {
+		t.Error("Jar was dropped")
+	}
+	if c.httpClient.Timeout != 9*time.Second {
+		t.Errorf("Timeout = %v, want 9s", c.httpClient.Timeout)
+	}
+	tr, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify was not applied")
+	}
+	if custom.Transport != nil {
+		t.Error("the caller's client was mutated")
 	}
 }

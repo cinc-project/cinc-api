@@ -66,7 +66,12 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	}
 	hc := o.httpClient
 	if o.skipTLSVerify {
-		hc = &http.Client{Timeout: hc.Timeout, Transport: cloneTransportSkipVerify(hc.Transport)}
+		// Copy the caller's client and swap only the transport, so Jar,
+		// CheckRedirect and any other configuration survive. Building a fresh
+		// http.Client here would silently drop them.
+		clone := *hc
+		clone.Transport = cloneTransportSkipVerify(hc.Transport)
+		hc = &clone
 	}
 	c := &Client{
 		baseURL: base, baseURLStr: base.String(), org: cfg.Org, clientName: cfg.ClientName,
