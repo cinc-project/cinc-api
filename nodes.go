@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,6 +19,17 @@ type Node struct {
 	Automatic   Attributes `json:"automatic,omitempty"`
 	PolicyName  string     `json:"policy_name,omitempty"`
 	PolicyGroup string     `json:"policy_group,omitempty"`
+}
+
+// MarshalJSON encodes the node with run_list always present as an array.
+// Chef's object validator requires an array there, and a nil slice with no
+// omitempty would encode as null.
+func (n Node) MarshalJSON() ([]byte, error) {
+	// The alias has an empty method set, so this does not recurse.
+	type alias Node
+	a := alias(n)
+	a.RunList = nonNil(a.RunList)
+	return json.Marshal(a)
 }
 
 // Tags returns the node's tags. Chef stores them as a string array under the
@@ -46,12 +58,13 @@ func (n *Node) Tags() []string {
 }
 
 // SetTags replaces the node's tags, allocating the normal attribute map if the
-// node has none yet.
+// node has none yet. Nil becomes an empty array rather than a JSON null, which
+// is what Chef stores for a node with no tags.
 func (n *Node) SetTags(tags []string) {
 	if n.Normal == nil {
 		n.Normal = Attributes{}
 	}
-	n.Normal["tags"] = tags
+	n.Normal["tags"] = nonNil(tags)
 }
 
 // AddTags adds tags that are not already present, preserving the order of the

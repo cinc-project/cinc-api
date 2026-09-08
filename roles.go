@@ -1,6 +1,9 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Role is a Chef role object.
 type Role struct {
@@ -10,6 +13,15 @@ type Role struct {
 	DefaultAttributes  Attributes          `json:"default_attributes,omitempty"`
 	OverrideAttributes Attributes          `json:"override_attributes,omitempty"`
 	EnvRunLists        map[string][]string `json:"env_run_lists,omitempty"`
+}
+
+// MarshalJSON encodes the role with run_list always present as an array, for
+// the same reason as Node.MarshalJSON.
+func (r Role) MarshalJSON() ([]byte, error) {
+	type alias Role
+	a := alias(r)
+	a.RunList = nonNil(a.RunList)
+	return json.Marshal(a)
 }
 
 // RolesService accesses the /roles endpoints.
