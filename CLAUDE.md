@@ -19,6 +19,9 @@ small, flat, and idiomatic — keep it that way.
    - Standard signatures: reads return `(value, *Response, error)`;
      deletes return `(*Response, error)`. Use `ptrOrNil(v, err)` to
      convert a value to a `*T` that is `nil` when `err != nil`.
+     A create returns `(*Response, error)` too when the server answers
+     with `{"uri":...}` — check what the endpoint actually returns before
+     promising a value the caller will never get.
    - Use the generic helper `do[T](ctx, c, method, path, body)` for
      every request. It signs, retries idempotent calls, decodes JSON,
      and maps non-2xx responses to `*ErrorResponse`.
@@ -30,6 +33,10 @@ small, flat, and idiomatic — keep it that way.
 3. Use `c.orgPath(p)` for org-scoped paths (`/organizations/<org>/...`).
    Top-level endpoints (e.g. `/_status`, `/license`, `/users`) take the
    absolute path directly — do **not** call `orgPath`.
+   Wrap every caller-supplied identifier in `esc()` as you interpolate it
+   (`orgPath("/nodes/" + esc(name))`). It is the identity function for
+   legal Chef names; without it a name can break the signature or walk
+   into another collection.
 4. Update the `README.md` Status table in the same PR (see below).
 
 ## Testing
@@ -61,6 +68,39 @@ small, flat, and idiomatic — keep it that way.
   unlike the `cinctest` fake the unit tests use. Run them when you
   touch the transport, signing, or cookbook-upload paths.
 
+## What the test doubles do not cover
+
+Both suites can be green while the wire contract is wrong. Known gaps, each
+of which has hidden a real bug:
+
+- **cinc-zero** returns only `all_files` on a cookbook GET (never the
+  per-segment slices), accepts `run_list: null`, and populates both `name`
+  and `groupname` on a group GET. A real Chef Server is stricter or shaped
+  differently on all three.
+- **cinctest** replays whatever body the test author wrote, so a fixture
+  that encodes a wrong assumption about the server's response will happily
+  confirm it forever.
+
+So: when you change a wire shape, say explicitly what a *real* server
+returns and how you know. "Tests pass" is not evidence of compatibility.
+To probe actual behaviour, write a throwaway `zz_probe_test.go` in the
+package, log what the client sends and what a fake server receives, then
+delete it — that is how the escaping and manifest-dedupe bugs were pinned
+down.
+
+## Linting
+
+`go vet` is in CI; these are not, and are worth running before a PR:
+
+```
+golangci-lint run --no-config --default=none \
+  -E staticcheck,unused,unparam,revive,bodyclose ./...
+```
+
+`gosec` is mostly noise here (the MD5 use is required by Chef's sandbox
+protocol and is annotated). A bare `staticcheck` binary may fail with a
+Go-version mismatch; go through golangci-lint instead.
+
 ## Auth and transport gotchas
 
 - The client signs every request with the v1.3 SHA-256 header protocol.
@@ -70,15 +110,31 @@ small, flat, and idiomatic — keep it that way.
   Chef signing headers.** `c.uploadFile` and `c.downloadFile` use raw
   `httpClient.Do` to enforce this. Any test that hits a bookshelf URL
   must assert `X-Ops-Authorization-1` is absent.
-- Retries: GETs are retried on 5xx and on network errors, up to
-  `WithMaxRetries(n)` (default 2). Non-GET requests are never retried.
-  Context cancellation/deadline never retries.
+- **The signed canonical path must equal what goes on the wire**, i.e.
+  `r.URL.EscapedPath()` — not `r.URL.Path`, which is already decoded and
+  will hide a mismatch. `verifySignature` in `pathescape_test.go` re-checks
+  the RSA signature server-side the way erchef does; use it whenever you
+  touch path construction.
+- Retries: GETs are retried on 5xx and on genuine wire failures, up to
+  `WithMaxRetries(n)` (default 2), with exponential backoff from 100ms.
+  Non-GET requests are never retried. Context cancellation/deadline never
+  retries. Only errors wrapped in `transportErr` are retriable — if you add
+  a new failure point in `doOnce` that happens on the wire, mark it, or it
+  will never be retried; if it is client-side, do not, or it will be
+  retried pointlessly.
 
 ## Encoding edge cases worth remembering
 
 - `Group.Update` rewraps `Users/Clients/Groups` into the server's
   required `actors: {users, clients, groups}` shape. Nil slices must
   serialize as `[]`, not `null` — `groups.go:nonNil` exists for this.
+- The nil-slice rule is not just groups: `Node`/`Role` normalise `run_list`
+  in `MarshalJSON`, and `SetTags` normalises `normal.tags`. Any slice Chef
+  validates as an array needs it.
+- A Go type assertion matches the **dynamic type exactly**, so
+  `any(Attributes{}).(map[string]any)` is false even though the two share
+  an underlying type. Attribute walking goes through `asAttributeMap`,
+  which accepts both — do not reintroduce a bare assertion.
 - `omitempty` does **not** elide nested struct values in Go's
   `encoding/json`. Use `omitzero` (Go 1.24+) or drop the tag when the
   field is a value-type struct.
