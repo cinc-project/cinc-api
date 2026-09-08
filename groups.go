@@ -1,6 +1,9 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Group is a Chef ACL group. The shape mirrors the server's GET response.
 // On Update the Users/Clients/Groups slices are rewrapped into the nested
@@ -38,12 +41,20 @@ func (s *GroupsService) Create(ctx context.Context, name string) (*Response, err
 	return resp, err
 }
 
-// Update replaces a group's members. The path segment is g.Name; the body is
-// emitted in the {groupname, actors:{users,clients,groups}} shape the server
-// requires on PUT. Nil member slices become empty JSON arrays rather than null.
+// Update replaces a group's members. The path segment is the group's name,
+// taken from Name or, when that is empty, GroupName; the body is emitted in
+// the {groupname, actors:{users,clients,groups}} shape the server requires on
+// PUT. Nil member slices become empty JSON arrays rather than null.
+//
+// A group with neither field set is an error rather than a PUT to the
+// collection endpoint.
 func (s *GroupsService) Update(ctx context.Context, g *Group) (*Group, *Response, error) {
+	name := g.name()
+	if name == "" {
+		return nil, nil, errors.New("cinc: group requires a Name or GroupName to update")
+	}
 	body := map[string]any{
-		"groupname": g.Name,
+		"groupname": name,
 		"actors": map[string]any{
 			"users":   nonNil(g.Users),
 			"clients": nonNil(g.Clients),
@@ -51,8 +62,18 @@ func (s *GroupsService) Update(ctx context.Context, g *Group) (*Group, *Response
 		},
 	}
 	updated, resp, err := do[Group](ctx, s.client, "PUT",
-		s.client.orgPath("/groups/"+g.Name), body)
+		s.client.orgPath("/groups/"+name), body)
 	return ptrOrNil(updated, err), resp, err
+}
+
+// name is the group's identifier. Chef identifies a group by "groupname";
+// "name" is a courtesy field carrying the same value that not every server
+// populates, so prefer it but fall back.
+func (g *Group) name() string {
+	if g.Name != "" {
+		return g.Name
+	}
+	return g.GroupName
 }
 
 // Delete removes a group by name.

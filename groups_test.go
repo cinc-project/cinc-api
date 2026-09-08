@@ -163,3 +163,40 @@ func TestGroups_NotFound(t *testing.T) {
 		t.Fatal("expected 404")
 	}
 }
+
+// Chef identifies a group by "groupname"; "name" is a courtesy field not every
+// server populates. Update must not depend on the courtesy field.
+func TestGroupsUpdate_FallsBackToGroupName(t *testing.T) {
+	var path string
+	var req map[string]any
+	srv := cinctest.New(t)
+	srv.Handle("PUT /organizations/o/groups/admins", cinctest.Route{
+		Body: `{"groupname":"admins"}`,
+		Assert: func(t *testing.T, r *http.Request, body []byte) {
+			path = r.URL.Path
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatalf("decode PUT: %v", err)
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	g := &Group{GroupName: "admins", Users: []string{"alice"}}
+	if _, _, err := c.Groups.Update(context.Background(), g); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if path != "/organizations/o/groups/admins" {
+		t.Errorf("PUT path = %q", path)
+	}
+	if req["groupname"] != "admins" {
+		t.Errorf("groupname = %v, want admins", req["groupname"])
+	}
+}
+
+// With neither field set the old code PUT to /groups/ with groupname:"".
+func TestGroupsUpdate_RequiresAName(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	if _, _, err := c.Groups.Update(context.Background(), &Group{Users: []string{"alice"}}); err == nil {
+		t.Fatal("Update with no name returned nil error; want an error and no request")
+	}
+}
