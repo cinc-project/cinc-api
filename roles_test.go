@@ -3,6 +3,8 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -70,5 +72,15 @@ func TestRoles_EnvironmentRunList(t *testing.T) {
 	}
 	if len(rl) != 2 || rl[1] != "recipe[app]" {
 		t.Fatalf("EnvironmentRunList = %v", rl)
+	}
+}
+
+func TestRole_NilRunListEncodesAsEmptyArray(t *testing.T) {
+	b, err := json.Marshal(&Role{Name: "web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"run_list":[]`) {
+		t.Errorf("encoded %s, want run_list to be []", b)
 	}
 }

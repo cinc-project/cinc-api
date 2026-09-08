@@ -3,8 +3,11 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -109,5 +112,46 @@ func TestNodes_CRUD(t *testing.T) {
 	names, _, err := c.Nodes.List(ctx)
 	if err != nil || names["web01"] == "" {
 		t.Fatalf("List: %+v %v", names, err)
+	}
+}
+
+// Chef's object validator wants run_list to be an array. A nil slice with no
+// omitempty encodes as null, which is not one.
+func TestNode_NilRunListEncodesAsEmptyArray(t *testing.T) {
+	b, err := json.Marshal(&Node{Name: "web01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"run_list":[]`) {
+		t.Errorf("encoded %s, want run_list to be []", b)
+	}
+}
+
+// SetTags(nil) has the same problem one level down, in normal.tags.
+func TestNode_SetTagsNilEncodesAsEmptyArray(t *testing.T) {
+	n := &Node{Name: "web01"}
+	n.SetTags(nil)
+	b, err := json.Marshal(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"tags":[]`) {
+		t.Errorf("encoded %s, want tags to be []", b)
+	}
+}
+
+// A populated run list must round-trip untouched.
+func TestNode_RunListRoundTrips(t *testing.T) {
+	in := &Node{Name: "web01", RunList: []string{"recipe[nginx]"}, Environment: "prod"}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Node
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(out.RunList, in.RunList) || out.Name != in.Name || out.Environment != in.Environment {
+		t.Errorf("round trip = %+v, want %+v", out, in)
 	}
 }
