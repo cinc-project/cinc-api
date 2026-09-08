@@ -131,7 +131,7 @@ type ACLsService struct{ client *Client }
 // "clients", "groups", "containers", "cookbooks", "data", "environments",
 // "policies", "policy_groups", "roles", ...).
 func (s *ACLsService) Get(ctx context.Context, objectType, name string) (*ACL, *Response, error) {
-	return s.getACL(ctx, s.client.orgPath(objectType+"/"+name))
+	return s.getACL(ctx, s.client.orgPath(esc(objectType)+"/"+esc(name)))
 }
 
 // SetPermission rewrites one permission's ACE on one object. The Chef API
@@ -145,13 +145,13 @@ func (s *ACLsService) Get(ctx context.Context, objectType, name string) (*ACL, *
 // Nil Actors/Groups slices are coerced to empty arrays so the server does
 // not reject the request for a null member list.
 func (s *ACLsService) SetPermission(ctx context.Context, objectType, name, perm string, ace *ACE) error {
-	return s.setACL(ctx, s.client.orgPath(objectType+"/"+name), perm, ace)
+	return s.setACL(ctx, s.client.orgPath(esc(objectType)+"/"+esc(name)), perm, ace)
 }
 
 // GetOrg returns the ACL of the organization object itself, served at
 // /organizations/ORG/_acl (no object-type segment).
 func (s *ACLsService) GetOrg(ctx context.Context) (*ACL, *Response, error) {
-	return s.getACL(ctx, "/organizations/"+s.client.org)
+	return s.getACL(ctx, "/organizations/"+esc(s.client.org))
 }
 
 // SetOrgPermission rewrites one permission's ACE on the organization object.
@@ -162,12 +162,12 @@ func (s *ACLsService) SetOrgPermission(ctx context.Context, perm string, ace *AC
 // GetUser returns the ACL of a global user object. User ACLs are top-level
 // (/users/USER/_acl), not org-scoped.
 func (s *ACLsService) GetUser(ctx context.Context, name string) (*ACL, *Response, error) {
-	return s.getACL(ctx, "/users/"+name)
+	return s.getACL(ctx, "/users/"+esc(name))
 }
 
 // SetUserPermission rewrites one permission's ACE on a global user object.
 func (s *ACLsService) SetUserPermission(ctx context.Context, name, perm string, ace *ACE) error {
-	return s.setACL(ctx, "/users/"+name, perm, ace)
+	return s.setACL(ctx, "/users/"+esc(name), perm, ace)
 }
 
 // getACL fetches the full ACL for the object whose path is base (without the
@@ -188,6 +188,6 @@ func (s *ACLsService) setACL(ctx context.Context, base, perm string, ace *ACE) e
 			"groups": nonNil(ace.Groups),
 		},
 	}
-	_, _, err := do[map[string]any](ctx, s.client, "PUT", base+"/_acl/"+perm, body)
+	_, _, err := do[map[string]any](ctx, s.client, "PUT", base+"/_acl/"+esc(perm), body)
 	return err
 }

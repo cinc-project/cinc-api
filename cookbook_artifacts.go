@@ -32,7 +32,7 @@ func (s *CookbookArtifactsService) List(ctx context.Context) (map[string]Cookboo
 // {name: {url, versions}} envelope.
 func (s *CookbookArtifactsService) GetVersions(ctx context.Context, name string) (*CookbookArtifactListEntry, *Response, error) {
 	m, resp, err := do[map[string]CookbookArtifactListEntry](ctx, s.client, "GET",
-		s.client.orgPath("/cookbook_artifacts/"+name), nil)
+		s.client.orgPath("/cookbook_artifacts/"+esc(name)), nil)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -46,14 +46,14 @@ func (s *CookbookArtifactsService) GetVersions(ctx context.Context, name string)
 // Get retrieves a single cookbook artifact by name and identifier.
 func (s *CookbookArtifactsService) Get(ctx context.Context, name, identifier string) (*Cookbook, *Response, error) {
 	cb, resp, err := do[Cookbook](ctx, s.client, "GET",
-		s.client.orgPath("/cookbook_artifacts/"+name+"/"+identifier), nil)
+		s.client.orgPath("/cookbook_artifacts/"+esc(name)+"/"+esc(identifier)), nil)
 	return ptrOrNil(cb, err), resp, err
 }
 
 // Delete removes a single cookbook artifact.
 func (s *CookbookArtifactsService) Delete(ctx context.Context, name, identifier string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/cookbook_artifacts/"+name+"/"+identifier), nil)
+		s.client.orgPath("/cookbook_artifacts/"+esc(name)+"/"+esc(identifier)), nil)
 	return resp, err
 }
 

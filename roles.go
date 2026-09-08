@@ -63,13 +63,13 @@ func (s *RolesService) List(ctx context.Context) (map[string]string, *Response, 
 // environment-specific run list (always including "_default").
 func (s *RolesService) Environments(ctx context.Context, role string) ([]string, *Response, error) {
 	return do[[]string](ctx, s.client, "GET",
-		s.client.orgPath("/roles/"+role+"/environments"), nil)
+		s.client.orgPath("/roles/"+esc(role)+"/environments"), nil)
 }
 
 // EnvironmentRunList returns the role's run list for one environment
 // (env_run_lists[env], or the default run_list when env is "_default").
 func (s *RolesService) EnvironmentRunList(ctx context.Context, role, env string) ([]string, *Response, error) {
 	rl, resp, err := do[runListBody](ctx, s.client, "GET",
-		s.client.orgPath("/roles/"+role+"/environments/"+env), nil)
+		s.client.orgPath("/roles/"+esc(role)+"/environments/"+esc(env)), nil)
 	return rl.RunList, resp, err
 }

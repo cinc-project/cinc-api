@@ -52,7 +52,7 @@ func (s *EnvironmentsService) List(ctx context.Context) (map[string]string, *Res
 // envCookbookQuery builds an environment cookbook path, appending the optional
 // num_versions query parameter when non-empty.
 func (s *EnvironmentsService) envPath(env, suffix, numVersions string) string {
-	p := s.client.orgPath("/environments/" + env + suffix)
+	p := s.client.orgPath("/environments/" + esc(env) + suffix)
 	if numVersions != "" {
 		p += "?num_versions=" + url.QueryEscape(numVersions)
 	}
@@ -71,7 +71,7 @@ func (s *EnvironmentsService) ListCookbooks(ctx context.Context, env, numVersion
 // environment, filtered by the environment's version constraints.
 func (s *EnvironmentsService) GetCookbook(ctx context.Context, env, name, numVersions string) (map[string]CookbookListEntry, *Response, error) {
 	return do[map[string]CookbookListEntry](ctx, s.client, "GET",
-		s.envPath(env, "/cookbooks/"+name, numVersions), nil)
+		s.envPath(env, "/cookbooks/"+esc(name), numVersions), nil)
 }
 
 // CookbookVersions solves the given run list against the environment and
@@ -79,20 +79,20 @@ func (s *EnvironmentsService) GetCookbook(ctx context.Context, env, name, numVer
 // it, keyed by cookbook name.
 func (s *EnvironmentsService) CookbookVersions(ctx context.Context, env string, runList []string) (map[string]Cookbook, *Response, error) {
 	return do[map[string]Cookbook](ctx, s.client, "POST",
-		s.client.orgPath("/environments/"+env+"/cookbook_versions"),
+		s.client.orgPath("/environments/"+esc(env)+"/cookbook_versions"),
 		map[string][]string{"run_list": runList})
 }
 
 // ListNodes returns the name->URL index of nodes in the environment.
 func (s *EnvironmentsService) ListNodes(ctx context.Context, env string) (map[string]string, *Response, error) {
 	return do[map[string]string](ctx, s.client, "GET",
-		s.client.orgPath("/environments/"+env+"/nodes"), nil)
+		s.client.orgPath("/environments/"+esc(env)+"/nodes"), nil)
 }
 
 // ListRecipes returns the recipes available to the environment.
 func (s *EnvironmentsService) ListRecipes(ctx context.Context, env string) ([]string, *Response, error) {
 	return do[[]string](ctx, s.client, "GET",
-		s.client.orgPath("/environments/"+env+"/recipes"), nil)
+		s.client.orgPath("/environments/"+esc(env)+"/recipes"), nil)
 }
 
 // RoleRunList returns the role's run list as scoped to the environment: the
@@ -100,7 +100,7 @@ func (s *EnvironmentsService) ListRecipes(ctx context.Context, env string) ([]st
 // environment.
 func (s *EnvironmentsService) RoleRunList(ctx context.Context, env, role string) ([]string, *Response, error) {
 	rl, resp, err := do[runListBody](ctx, s.client, "GET",
-		s.client.orgPath("/environments/"+env+"/roles/"+role), nil)
+		s.client.orgPath("/environments/"+esc(env)+"/roles/"+esc(role)), nil)
 	return rl.RunList, resp, err
 }
 

@@ -43,7 +43,7 @@ func (s *UsersService) List(ctx context.Context) (map[string]string, *Response, 
 
 // Get retrieves a single user's metadata by name.
 func (s *UsersService) Get(ctx context.Context, name string) (*User, *Response, error) {
-	u, resp, err := do[User](ctx, s.client, "GET", "/users/"+name, nil)
+	u, resp, err := do[User](ctx, s.client, "GET", "/users/"+esc(name), nil)
 	return ptrOrNil(u, err), resp, err
 }
 
@@ -57,13 +57,13 @@ func (s *UsersService) Create(ctx context.Context, u *User) (*UserCreateResult, 
 // Update replaces a user's metadata. Use UserName as the lookup key; other
 // fields are the new values.
 func (s *UsersService) Update(ctx context.Context, u *User) (*User, *Response, error) {
-	updated, resp, err := do[User](ctx, s.client, "PUT", "/users/"+u.UserName, u)
+	updated, resp, err := do[User](ctx, s.client, "PUT", "/users/"+esc(u.UserName), u)
 	return ptrOrNil(updated, err), resp, err
 }
 
 // Delete removes a user.
 func (s *UsersService) Delete(ctx context.Context, name string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "DELETE", "/users/"+name, nil)
+	_, resp, err := do[map[string]any](ctx, s.client, "DELETE", "/users/"+esc(name), nil)
 	return resp, err
 }
 
