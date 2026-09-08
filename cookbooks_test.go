@@ -634,3 +634,60 @@ func TestCookbooks_ListRecipes(t *testing.T) {
 		t.Fatalf("ListRecipes = %v", recipes)
 	}
 }
+
+// Only regular files belong in a cookbook. WalkDir does not follow symlinks
+// but os.ReadFile does, so an unfiltered walk packs the symlink target's
+// content - which may live outside the cookbook entirely.
+func TestLocalCookbookFromDir_SkipsSymlinkOutsideCookbook(t *testing.T) {
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "id_rsa")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "nginx")
+	if err := os.MkdirAll(filepath.Join(root, "recipes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "recipes", "default.rb"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "leak.rb")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	for _, f := range cb.files {
+		if f.name == "leak.rb" {
+			t.Errorf("packed symlink leak.rb with content %q", f.content)
+		}
+		if strings.Contains(string(f.content), "PRIVATE KEY MATERIAL") {
+			t.Errorf("file %s carries content from outside the cookbook", f.name)
+		}
+	}
+	if len(cb.files) != 1 {
+		t.Errorf("packed %d files, want 1 (recipes/default.rb)", len(cb.files))
+	}
+}
+
+// A dangling symlink must not abort the whole upload.
+func TestLocalCookbookFromDir_SkipsDanglingSymlink(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nginx")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "metadata.rb"), []byte("name 'nginx'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "gone"), filepath.Join(root, "dangling.rb")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	if len(cb.files) != 1 || cb.files[0].name != "metadata.rb" {
+		t.Errorf("packed %+v, want just metadata.rb", cb.files)
+	}
+}

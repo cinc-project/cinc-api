@@ -343,8 +343,8 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
 // pass to CookbooksService.Upload (or, with an identifier,
 // CookbookArtifactsService.Upload). The cookbook name is taken from the base
-// name of dir. Every file under dir is read and checksummed, except those
-// excluded by a chefignore file at the cookbook root — matching knife, an
+// name of dir. Every regular file under dir is read and checksummed, except
+// those excluded by a chefignore file at the cookbook root — matching knife, an
 // uploaded cookbook omits chefignored files. An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	cb := &LocalCookbook{Name: filepath.Base(dir), Version: version}
@@ -370,6 +370,13 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 			return nil
 		}
 		if ignore.Ignores(rel) {
+			return nil
+		}
+		// Only regular files belong in a cookbook. WalkDir does not follow
+		// symlinks but os.ReadFile does, so without this an entry symlinked
+		// out of the cookbook would be uploaded with its target's content,
+		// and a dangling one would abort the whole walk.
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		content, err := os.ReadFile(path)
