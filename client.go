@@ -1,6 +1,7 @@
 package cinc
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
@@ -20,6 +21,9 @@ type Client struct {
 	httpClient *http.Client
 	opts       options
 	clock      func() time.Time
+	// sleep waits for d, reporting false if ctx ended first. A field so tests
+	// can drive retry timing without waiting.
+	sleep func(ctx context.Context, d time.Duration) bool
 
 	// Services.
 	Nodes             *NodesService
@@ -66,7 +70,7 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	}
 	c := &Client{
 		baseURL: base, baseURLStr: base.String(), org: cfg.Org, clientName: cfg.ClientName,
-		key: cfg.Key, httpClient: hc, opts: o, clock: time.Now,
+		key: cfg.Key, httpClient: hc, opts: o, clock: time.Now, sleep: sleepCtx,
 	}
 	c.Nodes = &NodesService{client: c}
 	c.Roles = &RolesService{client: c}
@@ -115,6 +119,18 @@ func cloneTransportSkipVerify(base http.RoundTripper) *http.Transport {
 // orgPath prefixes p with /organizations/<org>.
 func (c *Client) orgPath(p string) string {
 	return "/organizations/" + c.org + "/" + strings.TrimLeft(p, "/")
+}
+
+// sleepCtx waits for d, reporting false if ctx ended first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // timestamp returns the current time as an ISO-8601 UTC string.

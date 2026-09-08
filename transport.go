@@ -9,9 +9,16 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cinc-project/cinc-api/internal/signing"
 )
+
+// retryBaseDelay is the wait before the first retry; each subsequent attempt
+// doubles it. With the default maxRetries of 2 a failing GET adds at most
+// 300ms, which is enough to let a server finish a restart or a load balancer
+// pick a different backend — the point of retrying at all.
+const retryBaseDelay = 100 * time.Millisecond
 
 // doRaw sends a signed request and returns the raw response body.
 // The caller owns closing nothing — the body is fully read and closed here.
@@ -19,29 +26,37 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([
 	var attempt int
 	for {
 		data, resp, err := c.doOnce(ctx, method, path, body)
-		// Retry only transient failures: a 5xx response, or a genuine transport
-		// error (no HTTP response at all). A non-2xx response surfaces as a
-		// non-nil err *with* resp set, so gate the network-error check on
-		// resp == nil — otherwise every 4xx (not-found, forbidden, ...) would be
-		// retried, since isNetErr treats any non-context error as retriable.
+		// Retry only transient failures: a 5xx response, or a failure on the
+		// wire (no HTTP response at all). A non-2xx response surfaces as a
+		// non-nil err *with* resp set, so gate the wire check on resp == nil —
+		// otherwise every 4xx (not-found, forbidden, ...) would be retried.
 		serverErr := resp != nil && resp.StatusCode >= 500
-		netErr := resp == nil && isNetErr(err)
-		if (serverErr || netErr) && method == http.MethodGet && attempt < c.opts.maxRetries {
-			attempt++
-			continue
+		if !(serverErr || isRetriable(err)) || method != http.MethodGet || attempt >= c.opts.maxRetries {
+			return data, resp, err
 		}
-		return data, resp, err
+		if !c.sleep(ctx, retryBaseDelay<<attempt) {
+			return data, resp, err
+		}
+		attempt++
 	}
 }
 
-func isNetErr(err error) bool {
-	if err == nil {
+// transportErr marks a failure that happened on the wire, as opposed to a
+// client-side one — an unbuildable request, a signing failure — which would
+// fail identically however many times it is repeated.
+type transportErr struct{ err error }
+
+func (e *transportErr) Error() string { return e.err.Error() }
+func (e *transportErr) Unwrap() error { return e.err }
+
+// isRetriable reports whether err is a wire failure a GET may safely repeat.
+// Context cancellation and deadlines never retry: the caller is done waiting.
+func isRetriable(err error) bool {
+	var te *transportErr
+	if !errors.As(err, &te) {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	return true
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
@@ -79,12 +94,12 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 
 	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cinc: %s %s: %w", method, path, err)
+		return nil, nil, &transportErr{fmt.Errorf("cinc: %s %s: %w", method, path, err)}
 	}
 	defer httpResp.Body.Close()
 	data, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cinc: read body: %w", err)
+		return nil, nil, &transportErr{fmt.Errorf("cinc: read body: %w", err)}
 	}
 	resp := &Response{HTTPResponse: httpResp, StatusCode: httpResp.StatusCode}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
