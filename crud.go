@@ -16,7 +16,7 @@ func (r crud[T]) get(ctx context.Context, name string) (T, *Response, error) {
 	return do[T](ctx, r.client, "GET", r.item(name), nil)
 }
 
-func (r crud[T]) create(ctx context.Context, name string, obj any) (T, *Response, error) {
+func (r crud[T]) create(ctx context.Context, obj any) (T, *Response, error) {
 	return do[T](ctx, r.client, "POST", r.coll(), obj)
 }
 

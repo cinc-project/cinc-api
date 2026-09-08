@@ -159,7 +159,7 @@ func (s *NodesService) Get(ctx context.Context, name string) (*Node, *Response, 
 
 // Create creates a new node.
 func (s *NodesService) Create(ctx context.Context, n *Node) (*Node, *Response, error) {
-	created, resp, err := s.res().create(ctx, n.Name, n)
+	created, resp, err := s.res().create(ctx, n)
 	return ptrOrNil(created, err), resp, err
 }
 

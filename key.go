@@ -1,4 +1,3 @@
-// Package cinc is a Go client for the Chef/CINC Server API.
 package cinc
 
 import (
