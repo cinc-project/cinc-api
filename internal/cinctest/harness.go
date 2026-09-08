@@ -53,5 +53,5 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	w.WriteHeader(status)
-	io.WriteString(w, route.Body)
+	_, _ = io.WriteString(w, route.Body) // canned test response; the assertion catches a short write
 }
