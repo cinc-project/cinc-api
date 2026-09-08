@@ -50,6 +50,7 @@ type CookbookLock struct {
 // match the source_options keys Chef writes into a Policyfile.lock.json.
 type SourceKind string
 
+// The source kinds a cookbook lock can name, one per source_options key.
 const (
 	SourcePath           SourceKind = "path"
 	SourceArtifactserver SourceKind = "artifactserver"

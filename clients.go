@@ -36,7 +36,7 @@ func (s *ClientsService) Get(ctx context.Context, name string) (*APIClient, *Res
 
 // Create creates a new client and returns its generated key material.
 func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*APIClient, *Response, error) {
-	created, resp, err := s.res().create(ctx, cl.Name, cl)
+	created, resp, err := s.res().create(ctx, cl)
 	return ptrOrNil(created, err), resp, err
 }
 

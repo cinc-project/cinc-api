@@ -29,7 +29,7 @@ func (s *EnvironmentsService) Get(ctx context.Context, name string) (*Environmen
 
 // Create creates a new environment.
 func (s *EnvironmentsService) Create(ctx context.Context, e *Environment) (*Environment, *Response, error) {
-	created, resp, err := s.res().create(ctx, e.Name, e)
+	created, resp, err := s.res().create(ctx, e)
 	return ptrOrNil(created, err), resp, err
 }
 

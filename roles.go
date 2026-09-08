@@ -27,7 +27,7 @@ func (s *RolesService) Get(ctx context.Context, name string) (*Role, *Response, 
 
 // Create creates a new role.
 func (s *RolesService) Create(ctx context.Context, r *Role) (*Role, *Response, error) {
-	created, resp, err := s.res().create(ctx, r.Name, r)
+	created, resp, err := s.res().create(ctx, r)
 	return ptrOrNil(created, err), resp, err
 }
 
