@@ -38,9 +38,13 @@ func (s *RolesService) Get(ctx context.Context, name string) (*Role, *Response, 
 }
 
 // Create creates a new role.
-func (s *RolesService) Create(ctx context.Context, r *Role) (*Role, *Response, error) {
-	created, resp, err := s.res().create(ctx, r)
-	return ptrOrNil(created, err), resp, err
+//
+// The Chef Server answers POST /roles with {"uri":...} rather than the
+// created object, so there is nothing to return but the response and any
+// error.
+func (s *RolesService) Create(ctx context.Context, r *Role) (*Response, error) {
+	_, resp, err := s.res().create(ctx, r)
+	return resp, err
 }
 
 // Update replaces an existing role.
