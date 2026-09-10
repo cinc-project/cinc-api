@@ -4,6 +4,7 @@ package cinc
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"testing"
 )
 
@@ -95,4 +96,36 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// Messages is documented as the server's error messages. The 401 hint is
+// client-side advice, so it belongs in Error() output, not in that slice.
+func TestErrorResponse_401MessagesAreServerOnly(t *testing.T) {
+	err := newErrorResponse("GET", "/x", 401, []byte(`{"error":["bad sig"]}`))
+	want := []string{"bad sig"}
+	if !slices.Equal(err.Messages, want) {
+		t.Errorf("Messages = %q, want %q", err.Messages, want)
+	}
+	if got := err.Error(); !contains(got, "clock") || !contains(got, "client key") {
+		t.Errorf("Error() = %q, want the 401 hint", got)
+	}
+}
+
+// A 401 with no server message still reads sensibly.
+func TestErrorResponse_401WithNoServerMessage(t *testing.T) {
+	err := newErrorResponse("GET", "/x", 401, nil)
+	if len(err.Messages) != 0 {
+		t.Errorf("Messages = %q, want empty", err.Messages)
+	}
+	if got := err.Error(); !contains(got, "clock") {
+		t.Errorf("Error() = %q, want the 401 hint", got)
+	}
+}
+
+// Other statuses are unaffected.
+func TestErrorResponse_NonAuthHasNoHint(t *testing.T) {
+	err := newErrorResponse("GET", "/x", 404, []byte(`{"error":["no such node"]}`))
+	if got := err.Error(); contains(got, "clock") {
+		t.Errorf("Error() = %q, want no 401 hint", got)
+	}
 }
