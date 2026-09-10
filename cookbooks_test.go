@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -689,5 +691,57 @@ func TestLocalCookbookFromDir_SkipsDanglingSymlink(t *testing.T) {
 	}
 	if len(cb.files) != 1 || cb.files[0].name != "metadata.rb" {
 		t.Errorf("packed %+v, want just metadata.rb", cb.files)
+	}
+}
+
+// A server may populate both the flat all_files manifest and the per-segment
+// slices. Merging them must not yield the same file twice: Download turns each
+// entry into a job, and two jobs for one path race to write the same file.
+func TestAllFiles_DedupesByPath(t *testing.T) {
+	cb := &Cookbook{
+		AllFilesManifest: []CookbookFileRef{
+			{Path: "recipes/default.rb", Checksum: "aa"},
+			{Path: "metadata.rb", Checksum: "bb"},
+		},
+		Recipes:   []CookbookFileRef{{Path: "recipes/default.rb", Checksum: "aa"}},
+		RootFiles: []CookbookFileRef{{Path: "metadata.rb", Checksum: "bb"}},
+	}
+	all := cb.AllFiles()
+	if len(all) != 2 {
+		t.Fatalf("AllFiles() returned %d refs, want 2: %+v", len(all), all)
+	}
+	seen := map[string]bool{}
+	for _, ref := range all {
+		if seen[ref.Path] {
+			t.Errorf("duplicate path %q", ref.Path)
+		}
+		seen[ref.Path] = true
+	}
+}
+
+// Download must fetch and write each cookbook file exactly once, even when the
+// manifest lists it in both shapes.
+func TestDownload_FetchesEachFileOnce(t *testing.T) {
+	var fetches int64
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt64(&fetches, 1)
+		w.Write([]byte("# default recipe\n"))
+	}))
+	defer files.Close()
+
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbooks/nginx/1.0.0", cinctest.Route{
+		Body: fmt.Sprintf(`{"cookbook_name":"nginx","version":"1.0.0",
+			"all_files":[{"path":"recipes/default.rb","url":%q}],
+			"recipes":[{"path":"recipes/default.rb","url":%q}]}`,
+			files.URL+"/f", files.URL+"/f"),
+	})
+	c := newTestClient(t, srv.Server)
+	dest := t.TempDir()
+	if err := c.Cookbooks.Download(context.Background(), "nginx", "1.0.0", dest); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if got := atomic.LoadInt64(&fetches); got != 1 {
+		t.Errorf("bookshelf fetches = %d, want 1", got)
 	}
 }
