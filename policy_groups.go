@@ -27,14 +27,14 @@ func (s *PolicyGroupsService) List(ctx context.Context) (map[string]PolicyGroup,
 // Get returns one group's pinned policy revisions.
 func (s *PolicyGroupsService) Get(ctx context.Context, name string) (*PolicyGroup, *Response, error) {
 	g, resp, err := do[PolicyGroup](ctx, s.client, "GET",
-		s.client.orgPath("/policy_groups/"+name), nil)
+		s.client.orgPath("/policy_groups/"+esc(name)), nil)
 	return ptrOrNil(g, err), resp, err
 }
 
 // Delete removes a policy group and all of its policy pinnings.
 func (s *PolicyGroupsService) Delete(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/policy_groups/"+name), nil)
+		s.client.orgPath("/policy_groups/"+esc(name)), nil)
 	return resp, err
 }
 
@@ -42,7 +42,7 @@ func (s *PolicyGroupsService) Delete(ctx context.Context, name string) (*Respons
 // named policy.
 func (s *PolicyGroupsService) GetPolicy(ctx context.Context, group, policy string) (*PolicyRevision, *Response, error) {
 	r, resp, err := do[PolicyRevision](ctx, s.client, "GET",
-		s.client.orgPath("/policy_groups/"+group+"/policies/"+policy), nil)
+		s.client.orgPath("/policy_groups/"+esc(group)+"/policies/"+esc(policy)), nil)
 	return ptrOrNil(r, err), resp, err
 }
 
@@ -52,7 +52,7 @@ func (s *PolicyGroupsService) GetPolicy(ctx context.Context, group, policy strin
 // may be a *PolicyRevision, a map, or any JSON-marshallable Policyfile.
 func (s *PolicyGroupsService) PutPolicy(ctx context.Context, group, policy string, doc any) (*PolicyRevision, *Response, error) {
 	r, resp, err := do[PolicyRevision](ctx, s.client, "PUT",
-		s.client.orgPath("/policy_groups/"+group+"/policies/"+policy), doc)
+		s.client.orgPath("/policy_groups/"+esc(group)+"/policies/"+esc(policy)), doc)
 	return ptrOrNil(r, err), resp, err
 }
 
@@ -60,6 +60,6 @@ func (s *PolicyGroupsService) PutPolicy(ctx context.Context, group, policy strin
 // deleting the underlying revision.
 func (s *PolicyGroupsService) DeletePolicy(ctx context.Context, group, policy string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/policy_groups/"+group+"/policies/"+policy), nil)
+		s.client.orgPath("/policy_groups/"+esc(group)+"/policies/"+esc(policy)), nil)
 	return resp, err
 }

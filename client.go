@@ -123,7 +123,7 @@ func cloneTransportSkipVerify(base http.RoundTripper) *http.Transport {
 
 // orgPath prefixes p with /organizations/<org>.
 func (c *Client) orgPath(p string) string {
-	return "/organizations/" + c.org + "/" + strings.TrimLeft(p, "/")
+	return "/organizations/" + esc(c.org) + "/" + strings.TrimLeft(p, "/")
 }
 
 // sleepCtx waits for d, reporting false if ctx ended first.

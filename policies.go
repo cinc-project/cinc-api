@@ -101,21 +101,21 @@ func (s *PoliciesService) List(ctx context.Context) (map[string]PolicyListEntry,
 // Get returns the set of revisions known for a single policy name.
 func (s *PoliciesService) Get(ctx context.Context, name string) (*PolicyRevisions, *Response, error) {
 	r, resp, err := do[PolicyRevisions](ctx, s.client, "GET",
-		s.client.orgPath("/policies/"+name), nil)
+		s.client.orgPath("/policies/"+esc(name)), nil)
 	return ptrOrNil(r, err), resp, err
 }
 
 // Delete removes a policy and every revision under it.
 func (s *PoliciesService) Delete(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/policies/"+name), nil)
+		s.client.orgPath("/policies/"+esc(name)), nil)
 	return resp, err
 }
 
 // GetRevision fetches a single revision of a policy.
 func (s *PoliciesService) GetRevision(ctx context.Context, name, revisionID string) (*PolicyRevision, *Response, error) {
 	r, resp, err := do[PolicyRevision](ctx, s.client, "GET",
-		s.client.orgPath("/policies/"+name+"/revisions/"+revisionID), nil)
+		s.client.orgPath("/policies/"+esc(name)+"/revisions/"+esc(revisionID)), nil)
 	return ptrOrNil(r, err), resp, err
 }
 
@@ -124,14 +124,14 @@ func (s *PoliciesService) GetRevision(ctx context.Context, name, revisionID stri
 // other JSON-marshallable value matching the Policyfile schema.
 func (s *PoliciesService) CreateRevision(ctx context.Context, name string, doc any) (*PolicyRevision, *Response, error) {
 	r, resp, err := do[PolicyRevision](ctx, s.client, "POST",
-		s.client.orgPath("/policies/"+name+"/revisions"), doc)
+		s.client.orgPath("/policies/"+esc(name)+"/revisions"), doc)
 	return ptrOrNil(r, err), resp, err
 }
 
 // DeleteRevision removes a single revision of a policy.
 func (s *PoliciesService) DeleteRevision(ctx context.Context, name, revisionID string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/policies/"+name+"/revisions/"+revisionID), nil)
+		s.client.orgPath("/policies/"+esc(name)+"/revisions/"+esc(revisionID)), nil)
 	return resp, err
 }
 

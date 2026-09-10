@@ -9,7 +9,7 @@ type crud[T any] struct {
 	path   string // resource collection path, e.g. "/nodes"
 }
 
-func (r crud[T]) item(name string) string { return r.client.orgPath(r.path + "/" + name) }
+func (r crud[T]) item(name string) string { return r.client.orgPath(r.path + "/" + esc(name)) }
 func (r crud[T]) coll() string            { return r.client.orgPath(r.path) }
 
 func (r crud[T]) get(ctx context.Context, name string) (T, *Response, error) {

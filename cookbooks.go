@@ -165,7 +165,7 @@ func (s *CookbooksService) ListRecipes(ctx context.Context) ([]string, *Response
 // ("" for the server default of one, "all" for every version, or "n");
 // versions come back newest-first.
 func (s *CookbooksService) GetVersions(ctx context.Context, name, numVersions string) (*CookbookListEntry, *Response, error) {
-	path := s.client.orgPath("/cookbooks/" + name)
+	path := s.client.orgPath("/cookbooks/" + esc(name))
 	if numVersions != "" {
 		path += "?num_versions=" + url.QueryEscape(numVersions)
 	}
@@ -183,14 +183,14 @@ func (s *CookbooksService) GetVersions(ctx context.Context, name, numVersions st
 // Get retrieves a single cookbook version manifest.
 func (s *CookbooksService) Get(ctx context.Context, name, version string) (*Cookbook, *Response, error) {
 	cb, resp, err := do[Cookbook](ctx, s.client, "GET",
-		s.client.orgPath("/cookbooks/"+name+"/"+version), nil)
+		s.client.orgPath("/cookbooks/"+esc(name)+"/"+esc(version)), nil)
 	return ptrOrNil(cb, err), resp, err
 }
 
 // Delete removes a single cookbook version.
 func (s *CookbooksService) Delete(ctx context.Context, name, version string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/cookbooks/"+name+"/"+version), nil)
+		s.client.orgPath("/cookbooks/"+esc(name)+"/"+esc(version)), nil)
 	return resp, err
 }
 
@@ -304,7 +304,7 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 		slug = cb.Identifier
 	}
 	_, _, err = do[map[string]any](ctx, c, "PUT",
-		c.orgPath(base+"/"+cb.Name+"/"+slug), manifest)
+		c.orgPath(base+"/"+esc(cb.Name)+"/"+esc(slug)), manifest)
 	if err != nil {
 		return fmt.Errorf("cinc: put cookbook manifest: %w", err)
 	}

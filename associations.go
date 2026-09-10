@@ -55,7 +55,7 @@ func (s *AssociationsService) ListMembers(ctx context.Context) ([]string, *Respo
 
 // GetMember returns one organization member's record.
 func (s *AssociationsService) GetMember(ctx context.Context, name string) (*OrgUser, *Response, error) {
-	u, resp, err := do[OrgUser](ctx, s.client, "GET", s.client.orgPath("/users/"+name), nil)
+	u, resp, err := do[OrgUser](ctx, s.client, "GET", s.client.orgPath("/users/"+esc(name)), nil)
 	return ptrOrNil(u, err), resp, err
 }
 
@@ -70,7 +70,7 @@ func (s *AssociationsService) AddMember(ctx context.Context, username string) (*
 // RemoveMember removes a user's association with the organization and returns
 // the user's end state.
 func (s *AssociationsService) RemoveMember(ctx context.Context, name string) (*OrgUser, *Response, error) {
-	u, resp, err := do[OrgUser](ctx, s.client, "DELETE", s.client.orgPath("/users/"+name), nil)
+	u, resp, err := do[OrgUser](ctx, s.client, "DELETE", s.client.orgPath("/users/"+esc(name)), nil)
 	return ptrOrNil(u, err), resp, err
 }
 
@@ -89,7 +89,7 @@ func (s *AssociationsService) Invite(ctx context.Context, username string) (*Inv
 // RescindInvite cancels a pending organization invitation by its ID.
 func (s *AssociationsService) RescindInvite(ctx context.Context, id string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/association_requests/"+id), nil)
+		s.client.orgPath("/association_requests/"+esc(id)), nil)
 	return resp, err
 }
 
@@ -97,14 +97,14 @@ func (s *AssociationsService) RescindInvite(ctx context.Context, id string) (*Re
 // This is the user-side view at /users/USER/association_requests, so the
 // invitations carry OrgName rather than Username.
 func (s *AssociationsService) ListUserInvites(ctx context.Context, username string) ([]Invitation, *Response, error) {
-	return do[[]Invitation](ctx, s.client, "GET", "/users/"+username+"/association_requests", nil)
+	return do[[]Invitation](ctx, s.client, "GET", "/users/"+esc(username)+"/association_requests", nil)
 }
 
 // UserInviteCount returns the number of invitations pending for the user.
 func (s *AssociationsService) UserInviteCount(ctx context.Context, username string) (int, *Response, error) {
 	v, resp, err := do[struct {
 		Value int `json:"value"`
-	}](ctx, s.client, "GET", "/users/"+username+"/association_requests/count", nil)
+	}](ctx, s.client, "GET", "/users/"+esc(username)+"/association_requests/count", nil)
 	return v.Value, resp, err
 }
 
@@ -116,7 +116,7 @@ func (s *AssociationsService) RespondInvite(ctx context.Context, username, id st
 		response = "accept"
 	}
 	_, resp, err := do[map[string]any](ctx, s.client, "PUT",
-		"/users/"+username+"/association_requests/"+id, map[string]string{"response": response})
+		"/users/"+esc(username)+"/association_requests/"+esc(id), map[string]string{"response": response})
 	return resp, err
 }
 
@@ -127,7 +127,7 @@ type userOrg struct {
 
 // ListUserOrgs returns the organizations the named global user belongs to.
 func (s *AssociationsService) ListUserOrgs(ctx context.Context, username string) ([]Org, *Response, error) {
-	wrapped, resp, err := do[[]userOrg](ctx, s.client, "GET", "/users/"+username+"/organizations", nil)
+	wrapped, resp, err := do[[]userOrg](ctx, s.client, "GET", "/users/"+esc(username)+"/organizations", nil)
 	if err != nil {
 		return nil, resp, err
 	}

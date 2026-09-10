@@ -28,7 +28,7 @@ func (s *GroupsService) List(ctx context.Context) (map[string]string, *Response,
 // Get retrieves a single group by name, including its members.
 func (s *GroupsService) Get(ctx context.Context, name string) (*Group, *Response, error) {
 	g, resp, err := do[Group](ctx, s.client, "GET",
-		s.client.orgPath("/groups/"+name), nil)
+		s.client.orgPath("/groups/"+esc(name)), nil)
 	return ptrOrNil(g, err), resp, err
 }
 
@@ -62,7 +62,7 @@ func (s *GroupsService) Update(ctx context.Context, g *Group) (*Group, *Response
 		},
 	}
 	updated, resp, err := do[Group](ctx, s.client, "PUT",
-		s.client.orgPath("/groups/"+name), body)
+		s.client.orgPath("/groups/"+esc(name)), body)
 	return ptrOrNil(updated, err), resp, err
 }
 
@@ -79,7 +79,7 @@ func (g *Group) name() string {
 // Delete removes a group by name.
 func (s *GroupsService) Delete(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/groups/"+name), nil)
+		s.client.orgPath("/groups/"+esc(name)), nil)
 	return resp, err
 }
 
