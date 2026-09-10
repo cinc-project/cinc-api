@@ -31,7 +31,8 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([
 		// non-nil err *with* resp set, so gate the wire check on resp == nil —
 		// otherwise every 4xx (not-found, forbidden, ...) would be retried.
 		serverErr := resp != nil && resp.StatusCode >= 500
-		if !(serverErr || isRetriable(err)) || method != http.MethodGet || attempt >= c.opts.maxRetries {
+		retriable := serverErr || isRetriable(err)
+		if !retriable || method != http.MethodGet || attempt >= c.opts.maxRetries {
 			return data, resp, err
 		}
 		if !c.sleep(ctx, retryBaseDelay<<attempt) {
