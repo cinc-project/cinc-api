@@ -11,33 +11,10 @@ small, flat, and idiomatic — keep it that way.
 - `internal/cinctest` is the test-only fake-server harness.
 - `testdata/test_key.pem` is the shared fixture RSA key used by all tests.
 
-## Adding a new service
-
-1. Create `foo.go` with:
-   - The wire types (struct fields use JSON tags; prefer `omitempty`).
-   - A `FooService struct{ client *Client }` and its methods.
-   - Standard signatures: reads return `(value, *Response, error)`;
-     deletes return `(*Response, error)`. Use `ptrOrNil(v, err)` to
-     convert a value to a `*T` that is `nil` when `err != nil`.
-     A create returns `(*Response, error)` too when the server answers
-     with `{"uri":...}` — check what the endpoint actually returns before
-     promising a value the caller will never get.
-   - Use the generic helper `do[T](ctx, c, method, path, body)` for
-     every request. It signs, retries idempotent calls, decodes JSON,
-     and maps non-2xx responses to `*ErrorResponse`.
-   - If the resource has plain Get/Create/Update/Delete/List, the
-     `crud[T]` helper in `crud.go` saves boilerplate (see `nodes.go`).
-2. Wire the service onto `*Client` in `client.go` — declare the field on
-   the struct and assign it in `NewClient`. Add it to the
-   `TestNewClient_WiresAllServices` check.
-3. Use `c.orgPath(p)` for org-scoped paths (`/organizations/<org>/...`).
-   Top-level endpoints (e.g. `/_status`, `/license`, `/users`) take the
-   absolute path directly — do **not** call `orgPath`.
-   Wrap every caller-supplied identifier in `esc()` as you interpolate it
-   (`orgPath("/nodes/" + esc(name))`). It is the identity function for
-   legal Chef names; without it a name can break the signature or walk
-   into another collection.
-4. Update the `README.md` Status table in the same PR (see below).
+Two procedures live in `.claude/skills/` instead of here, so they cost
+nothing until they apply: **adding-a-service** (the shape every service
+follows, and wiring it onto `*Client`) and **preparing-a-pr** (lint
+commands and PR conventions).
 
 ## Testing
 
@@ -58,7 +35,6 @@ small, flat, and idiomatic — keep it that way.
 - Run `go test ./... -race -count=2` before committing. For coverage
   including the test-only `cinctest` package use
   `go test ./... -coverpkg=./... -coverprofile=...`.
-- `go vet ./...` must be clean.
 - **Integration tests live in `integration/`, a *separate* Go module**
   (its own `go.mod`, so the cinc-zero test dependency never reaches
   consumers of this package — the root import stays zero-dependency).
@@ -88,28 +64,15 @@ package, log what the client sends and what a fake server receives, then
 delete it — that is how the escaping and manifest-dedupe bugs were pinned
 down.
 
-## Linting
-
-`go vet` is in CI; these are not, and are worth running before a PR:
-
-```
-golangci-lint run --no-config --default=none \
-  -E staticcheck,unused,unparam,revive,bodyclose ./...
-```
-
-`gosec` is mostly noise here (the MD5 use is required by Chef's sandbox
-protocol and is annotated). A bare `staticcheck` binary may fail with a
-Go-version mismatch; go through golangci-lint instead.
-
 ## Auth and transport gotchas
 
 - The client signs every request with the v1.3 SHA-256 header protocol.
-  The signed canonical path is stripped of any `?query` — that fix is
-  in `transport.doOnce`; do not re-introduce the query string.
+  The signed canonical path excludes any `?query` — see `transport.doOnce`;
+  do not re-introduce it.
 - **Pre-signed URLs (cookbook bookshelf, sandbox uploads) must NOT carry
-  Chef signing headers.** `c.uploadFile` and `c.downloadFile` use raw
-  `httpClient.Do` to enforce this. Any test that hits a bookshelf URL
-  must assert `X-Ops-Authorization-1` is absent.
+  Chef signing headers** — `c.uploadFile` and `c.downloadFile` use raw
+  `httpClient.Do` to enforce it. Any test that hits a bookshelf URL must
+  assert `X-Ops-Authorization-1` is absent.
 - **The signed canonical path must equal what goes on the wire**, i.e.
   `r.URL.EscapedPath()` — not `r.URL.Path`, which is already decoded and
   will hide a mismatch. `verifySignature` in `pathescape_test.go` re-checks
@@ -126,11 +89,10 @@ Go-version mismatch; go through golangci-lint instead.
 ## Encoding edge cases worth remembering
 
 - `Group.Update` rewraps `Users/Clients/Groups` into the server's
-  required `actors: {users, clients, groups}` shape. Nil slices must
-  serialize as `[]`, not `null` — `groups.go:nonNil` exists for this.
-- The nil-slice rule is not just groups: `Node`/`Role` normalise `run_list`
-  in `MarshalJSON`, and `SetTags` normalises `normal.tags`. Any slice Chef
-  validates as an array needs it.
+  required `actors: {users, clients, groups}` shape.
+- Any slice Chef validates as an array must serialize as `[]`, not
+  `null`: `groups.go:nonNil`, `run_list` in `Node`/`Role.MarshalJSON`,
+  and `normal.tags` in `SetTags`.
 - A Go type assertion matches the **dynamic type exactly**, so
   `any(Attributes{}).(map[string]any)` is false even though the two share
   an underlying type. Attribute walking goes through `asAttributeMap`,
@@ -145,16 +107,3 @@ Go-version mismatch; go through golangci-lint instead.
   `WithPartial` switches the underlying request from GET to POST with
   the projection map as the body — this is server-required, not a
   client choice.
-
-## PR conventions
-
-- Whenever you open a PR that adds, removes, or renames a public
-  surface (service, exported method, option, type), update `README.md`
-  in the same PR so the **Status** table matches what the package
-  actually exposes.
-- Keep commit messages explanatory and terse — see `git log` for the
-  established style.
-- The PR description should include a **Test plan** checklist.
-- One feature per PR. Multiple endpoint families should ship as
-  separate PRs unless they are tightly coupled (e.g. Keys + Groups
-  shipped together because they share ACL semantics).
