@@ -40,6 +40,7 @@ following endpoint families are implemented:
 | `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision |
 | `c.PolicyGroups`     | `/policy_groups`                      | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy           |
 | `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
+| `c.PushJobs`         | `/pushy/jobs`                         | Create (start a job) / Get (job status + per-node outcomes)         |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
 | `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete / Environments / EnvironmentRunList |
 | `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`), `SearchAll`, `Indexes` |
