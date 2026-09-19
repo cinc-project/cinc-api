@@ -23,7 +23,7 @@ func (s *ContainersService) List(ctx context.Context) (map[string]string, *Respo
 // Get retrieves a single container by name.
 func (s *ContainersService) Get(ctx context.Context, name string) (*Container, *Response, error) {
 	cn, resp, err := do[Container](ctx, s.client, "GET",
-		s.client.orgPath("/containers/"+name), nil)
+		s.client.orgPath("/containers/"+esc(name)), nil)
 	return ptrOrNil(cn, err), resp, err
 }
 
@@ -39,6 +39,6 @@ func (s *ContainersService) Create(ctx context.Context, name string) (*Response,
 // Delete removes a container by name.
 func (s *ContainersService) Delete(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/containers/"+name), nil)
+		s.client.orgPath("/containers/"+esc(name)), nil)
 	return resp, err
 }

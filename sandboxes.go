@@ -35,7 +35,7 @@ func (c *Client) createSandbox(ctx context.Context, checksumsHex []string) (*san
 // commitSandbox finalizes a sandbox after all needed files are uploaded.
 func (c *Client) commitSandbox(ctx context.Context, id string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, c, "PUT",
-		c.orgPath("/sandboxes/"+id), map[string]any{"is_completed": true})
+		c.orgPath("/sandboxes/"+esc(id)), map[string]any{"is_completed": true})
 	return resp, err
 }
 

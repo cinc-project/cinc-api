@@ -33,7 +33,7 @@ func (s *DataBagsService) Create(ctx context.Context, name string) (*Response, e
 // Delete removes a data bag and all its items.
 func (s *DataBagsService) Delete(ctx context.Context, name string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "DELETE",
-		s.client.orgPath("/data/"+name), nil)
+		s.client.orgPath("/data/"+esc(name)), nil)
 	return resp, err
 }
 
@@ -48,9 +48,9 @@ type DataBagItemsService struct {
 	bag    string
 }
 
-func (s *DataBagItemsService) coll() string { return s.client.orgPath("/data/" + s.bag) }
+func (s *DataBagItemsService) coll() string { return s.client.orgPath("/data/" + esc(s.bag)) }
 func (s *DataBagItemsService) item(id string) string {
-	return s.client.orgPath("/data/" + s.bag + "/" + id)
+	return s.client.orgPath("/data/" + esc(s.bag) + "/" + esc(id))
 }
 
 // List returns the item id->URL index for the bag.

@@ -54,7 +54,7 @@ func (s *SearchService) Query(ctx context.Context, index, query string, opts ...
 	v.Set("q", query)
 	v.Set("start", strconv.Itoa(p.start))
 	v.Set("rows", strconv.Itoa(p.rows))
-	path := s.client.orgPath("/search/"+index) + "?" + v.Encode()
+	path := s.client.orgPath("/search/"+esc(index)) + "?" + v.Encode()
 
 	var body any
 	method := "GET"

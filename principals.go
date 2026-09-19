@@ -23,6 +23,6 @@ type PrincipalsService struct{ client *Client }
 func (s *PrincipalsService) Get(ctx context.Context, name string) ([]Principal, *Response, error) {
 	out, resp, err := do[struct {
 		Principals []Principal `json:"principals"`
-	}](ctx, s.client, "GET", s.client.orgPath("/principals/"+name), nil)
+	}](ctx, s.client, "GET", s.client.orgPath("/principals/"+esc(name)), nil)
 	return out.Principals, resp, err
 }

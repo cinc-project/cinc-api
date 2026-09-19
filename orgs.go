@@ -30,7 +30,7 @@ func (s *OrgsService) List(ctx context.Context) (map[string]string, *Response, e
 
 // Get retrieves one organization's metadata.
 func (s *OrgsService) Get(ctx context.Context, name string) (*Org, *Response, error) {
-	o, resp, err := do[Org](ctx, s.client, "GET", "/organizations/"+name, nil)
+	o, resp, err := do[Org](ctx, s.client, "GET", "/organizations/"+esc(name), nil)
 	return ptrOrNil(o, err), resp, err
 }
 
@@ -44,12 +44,12 @@ func (s *OrgsService) Create(ctx context.Context, o *Org) (*OrgCreateResult, *Re
 
 // Update replaces an organization's metadata (typically FullName).
 func (s *OrgsService) Update(ctx context.Context, o *Org) (*Org, *Response, error) {
-	updated, resp, err := do[Org](ctx, s.client, "PUT", "/organizations/"+o.Name, o)
+	updated, resp, err := do[Org](ctx, s.client, "PUT", "/organizations/"+esc(o.Name), o)
 	return ptrOrNil(updated, err), resp, err
 }
 
 // Delete removes an organization.
 func (s *OrgsService) Delete(ctx context.Context, name string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "DELETE", "/organizations/"+name, nil)
+	_, resp, err := do[map[string]any](ctx, s.client, "DELETE", "/organizations/"+esc(name), nil)
 	return resp, err
 }

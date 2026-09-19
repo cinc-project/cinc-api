@@ -34,14 +34,14 @@ type KeysService struct{ client *Client }
 
 // User returns a handle to the keys of the named global user.
 func (s *KeysService) User(name string) *KeyScope {
-	return &KeyScope{client: s.client, path: "/users/" + name + "/keys"}
+	return &KeyScope{client: s.client, path: "/users/" + esc(name) + "/keys"}
 }
 
 // Client returns a handle to the keys of the named org client.
 func (s *KeysService) Client(name string) *KeyScope {
 	return &KeyScope{
 		client: s.client,
-		path:   s.client.orgPath("/clients/" + name + "/keys"),
+		path:   s.client.orgPath("/clients/" + esc(name) + "/keys"),
 	}
 }
 
@@ -52,7 +52,7 @@ type KeyScope struct {
 	path   string // absolute server path of the keys collection
 }
 
-func (s *KeyScope) item(name string) string { return s.path + "/" + name }
+func (s *KeyScope) item(name string) string { return s.path + "/" + esc(name) }
 
 // List returns every key in the scope.
 func (s *KeyScope) List(ctx context.Context) ([]Key, *Response, error) {
