@@ -79,3 +79,24 @@ func TestAttributes_RoundTripPreservesUnknown(t *testing.T) {
 		t.Fatalf("round trip lost data: %s", out)
 	}
 }
+
+// A nested attribute tree built in Go holds Attributes values, not
+// map[string]any. Dig must walk those too: a type assertion to map[string]any
+// does not match the named type.
+func TestDig_TraversesNestedAttributes(t *testing.T) {
+	a := Attributes{"network": Attributes{"interfaces": Attributes{"eth0": "up"}}}
+	got, ok := a.Dig("network", "interfaces", "eth0")
+	if !ok || got != "up" {
+		t.Errorf("Dig = %v, %v; want \"up\", true", got, ok)
+	}
+	if got := a.GetString("network", "interfaces", "eth0"); got != "up" {
+		t.Errorf("GetString = %q, want \"up\"", got)
+	}
+}
+
+func TestNodeAttribute_TraversesNestedAttributes(t *testing.T) {
+	n := &Node{Normal: Attributes{"network": Attributes{"default_gateway": "10.0.0.1"}}}
+	if got := n.AttributeString("network.default_gateway"); got != "10.0.0.1" {
+		t.Errorf("AttributeString = %q, want \"10.0.0.1\"", got)
+	}
+}
