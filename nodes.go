@@ -171,9 +171,13 @@ func (s *NodesService) Get(ctx context.Context, name string) (*Node, *Response, 
 }
 
 // Create creates a new node.
-func (s *NodesService) Create(ctx context.Context, n *Node) (*Node, *Response, error) {
-	created, resp, err := s.res().create(ctx, n)
-	return ptrOrNil(created, err), resp, err
+//
+// The Chef Server answers POST /nodes with {"uri":...} rather than the
+// created object, so there is nothing to return but the response and any
+// error.
+func (s *NodesService) Create(ctx context.Context, n *Node) (*Response, error) {
+	_, resp, err := s.res().create(ctx, n)
+	return resp, err
 }
 
 // Update replaces an existing node.

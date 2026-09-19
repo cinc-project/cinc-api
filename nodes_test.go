@@ -31,7 +31,7 @@ func TestNodes_Errors(t *testing.T) {
 		srv.Handle("POST /organizations/o/nodes",
 			cinctest.Route{Status: 409, Body: `{"error":["node already exists"]}`})
 		c := newTestClient(t, srv.Server)
-		_, _, err := c.Nodes.Create(context.Background(), &Node{Name: "dup"})
+		_, err := c.Nodes.Create(context.Background(), &Node{Name: "dup"})
 		if !errors.Is(err, ErrConflict) {
 			t.Fatalf("err = %v, want ErrConflict", err)
 		}
@@ -100,7 +100,7 @@ func TestNodes_CRUD(t *testing.T) {
 		n.Automatic.GetString("fqdn") != "web01.x" {
 		t.Fatalf("Get: %+v %v", n, err)
 	}
-	if _, _, err := c.Nodes.Create(ctx, &Node{Name: "web02"}); err != nil {
+	if _, err := c.Nodes.Create(ctx, &Node{Name: "web02"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, _, err := c.Nodes.Update(ctx, &Node{Name: "web01", Environment: "staging"}); err != nil {
@@ -153,5 +153,22 @@ func TestNode_RunListRoundTrips(t *testing.T) {
 	}
 	if !slices.Equal(out.RunList, in.RunList) || out.Name != in.Name || out.Environment != in.Environment {
 		t.Errorf("round trip = %+v, want %+v", out, in)
+	}
+}
+
+// Chef answers POST /nodes with {"uri":...}, so there is no created node to
+// return. Create reports only the response and any error.
+func TestNodesCreate_ReturnsOnlyResponseAndError(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/nodes", cinctest.Route{
+		Status: 201, Body: `{"uri":"http://x/nodes/web02"}`,
+	})
+	c := newTestClient(t, srv.Server)
+	resp, err := c.Nodes.Create(context.Background(), &Node{Name: "web02"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if resp.StatusCode != 201 {
+		t.Errorf("StatusCode = %d, want 201", resp.StatusCode)
 	}
 }

@@ -28,9 +28,13 @@ func (s *EnvironmentsService) Get(ctx context.Context, name string) (*Environmen
 }
 
 // Create creates a new environment.
-func (s *EnvironmentsService) Create(ctx context.Context, e *Environment) (*Environment, *Response, error) {
-	created, resp, err := s.res().create(ctx, e)
-	return ptrOrNil(created, err), resp, err
+//
+// The Chef Server answers POST /environments with {"uri":...} rather than the
+// created object, so there is nothing to return but the response and any
+// error.
+func (s *EnvironmentsService) Create(ctx context.Context, e *Environment) (*Response, error) {
+	_, resp, err := s.res().create(ctx, e)
+	return resp, err
 }
 
 // Update replaces an existing environment.

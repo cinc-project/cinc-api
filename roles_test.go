@@ -29,7 +29,7 @@ func TestRoles_CRUD(t *testing.T) {
 	if err != nil || r.Name != "web" || len(r.RunList) != 1 {
 		t.Fatalf("Get: %+v %v", r, err)
 	}
-	if _, _, err := c.Roles.Create(ctx, &Role{Name: "db"}); err != nil {
+	if _, err := c.Roles.Create(ctx, &Role{Name: "db"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, _, err := c.Roles.Update(ctx, &Role{Name: "web"}); err != nil {

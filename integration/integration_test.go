@@ -71,7 +71,7 @@ func TestIntegration_NodeLifecycle(t *testing.T) {
 	// A real Chef server answers POST /nodes with {"uri": "..."} rather than
 	// the full node object, so the returned value is intentionally not asserted
 	// on here — creation is verified through the subsequent Get.
-	if _, _, err := c.Nodes.Create(ctx, &cinc.Node{
+	if _, err := c.Nodes.Create(ctx, &cinc.Node{
 		Name: "web01", Environment: "_default", RunList: []string{"recipe[nginx]"},
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -114,7 +114,7 @@ func TestIntegration_Search(t *testing.T) {
 	c := newClient(t)
 	ctx := context.Background()
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		if _, _, err := c.Nodes.Create(ctx, &cinc.Node{Name: name, RunList: []string{}}); err != nil {
+		if _, err := c.Nodes.Create(ctx, &cinc.Node{Name: name, RunList: []string{}}); err != nil {
 			t.Fatalf("seed node %s: %v", name, err)
 		}
 	}

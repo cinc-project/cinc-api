@@ -29,7 +29,7 @@ func TestEnvironments_CRUD(t *testing.T) {
 	if err != nil || e.Name != "prod" || e.CookbookVersions["nginx"] != "= 1.2.0" {
 		t.Fatalf("Get: %+v %v", e, err)
 	}
-	if _, _, err := c.Environments.Create(ctx, &Environment{Name: "dev"}); err != nil {
+	if _, err := c.Environments.Create(ctx, &Environment{Name: "dev"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, _, err := c.Environments.Update(ctx, &Environment{Name: "prod"}); err != nil {
