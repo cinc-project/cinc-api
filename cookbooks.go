@@ -101,20 +101,35 @@ type Cookbook struct {
 }
 
 // AllFiles flattens the flat all_files manifest and all nine per-segment slices
-// into a single slice. A server response populates one shape or the other, so
-// the merge yields the cookbook's files in either case.
+// into a single slice, deduplicated by path.
+//
+// Most servers populate one shape or the other, but nothing guarantees it, and
+// a file listed in both must still yield one entry: callers turn each entry
+// into work (Download turns it into a file to fetch and write), so a duplicate
+// means two writers for one path. The all_files entry wins, and within the
+// per-segment slices the first occurrence does.
 func (cb *Cookbook) AllFiles() []CookbookFileRef {
-	all := make([]CookbookFileRef, 0,
-		len(cb.AllFilesManifest)+
-			len(cb.Files)+len(cb.Definitions)+len(cb.Libraries)+
-			len(cb.Attributes)+len(cb.Recipes)+len(cb.Providers)+
-			len(cb.Resources)+len(cb.RootFiles)+len(cb.Templates))
-	all = append(all, cb.AllFilesManifest...)
+	total := len(cb.AllFilesManifest) +
+		len(cb.Files) + len(cb.Definitions) + len(cb.Libraries) +
+		len(cb.Attributes) + len(cb.Recipes) + len(cb.Providers) +
+		len(cb.Resources) + len(cb.RootFiles) + len(cb.Templates)
+	all := make([]CookbookFileRef, 0, total)
+	seen := make(map[string]bool, total)
+	add := func(refs []CookbookFileRef) {
+		for _, ref := range refs {
+			if seen[ref.Path] {
+				continue
+			}
+			seen[ref.Path] = true
+			all = append(all, ref)
+		}
+	}
+	add(cb.AllFilesManifest)
 	for _, seg := range [][]CookbookFileRef{
 		cb.Files, cb.Definitions, cb.Libraries, cb.Attributes,
 		cb.Recipes, cb.Providers, cb.Resources, cb.RootFiles, cb.Templates,
 	} {
-		all = append(all, seg...)
+		add(seg)
 	}
 	return all
 }
