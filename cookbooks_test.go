@@ -737,7 +737,7 @@ func TestUploadFile_NonSuccess(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 	recordSleeps(c) // the 500 is retried; don't wait between attempts
-	err := c.uploadFile(context.Background(), srv.Server.URL+"/file", []byte("data"))
+	err := c.uploadFile(context.Background(), srv.Server.URL+"/file", tempCookbookFile(t, "data"))
 	if err == nil {
 		t.Fatal("expected error for non-2xx upload")
 	}
@@ -750,7 +750,7 @@ func TestUploadFile_BadURL(t *testing.T) {
 	c, _ := NewClient(Config{
 		ServerURL: "https://h", Org: "o", ClientName: "c", Key: testRSAKey(t),
 	})
-	if err := c.uploadFile(context.Background(), "://not-a-url", []byte("x")); err == nil {
+	if err := c.uploadFile(context.Background(), "://not-a-url", tempCookbookFile(t, "x")); err == nil {
 		t.Fatal("expected error for malformed upload URL")
 	}
 }
@@ -828,6 +828,74 @@ func TestCookbooks_UploadRoundTrip(t *testing.T) {
 	}
 }
 
+// LocalCookbookFromDir keeps only each file's path and checksum; content is
+// read at upload time, and only for files the sandbox says it needs. A file
+// the server already has is never opened, so removing it after the walk does
+// not matter, and a needed one is streamed from disk unchanged.
+func TestCookbooks_Upload_OpensOnlyNeededFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nginx")
+	have := "package 'nginx'\n"
+	need := "default['nginx']['port'] = 80\n"
+	writeTree(t, root, map[string]string{
+		"metadata.rb":           "name 'nginx'\nversion '1.0.0'\n",
+		"recipes/default.rb":    have,
+		"attributes/default.rb": need,
+	})
+	cb, err := LocalCookbookFromDir(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "recipes", "default.rb")); err != nil {
+		t.Fatal(err)
+	}
+	haveSum, needSum := md5Hex([]byte(have)), md5Hex([]byte(need))
+
+	var gotBody, gotMD5 string
+	var gotLen int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			w.WriteHeader(201)
+			fmt.Fprintf(w, `{"sandbox_id":"sb","checksums":{
+				"%s":{"needs_upload":false},
+				"%s":{"needs_upload":false},
+				"%s":{"needs_upload":true,"url":"http://%s/shelf"}}}`,
+				haveSum, md5Hex([]byte("name 'nginx'\nversion '1.0.0'\n")), needSum, r.Host)
+		case r.Method == "PUT" && r.URL.Path == "/shelf":
+			b, _ := io.ReadAll(r.Body)
+			gotBody, gotMD5, gotLen = string(b), r.Header.Get("Content-MD5"), r.ContentLength
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb":
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/cookbooks/nginx/1.0.0":
+			w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	if err := newTestClient(t, srv).Cookbooks.Upload(context.Background(), cb); err != nil {
+		t.Fatalf("Upload: %v (a file the server already has must not be opened)", err)
+	}
+	if gotBody != need || gotLen != int64(len(need)) || gotMD5 != md5HexToBase64Must(t, needSum) {
+		t.Errorf("uploaded %q (Content-Length %d, Content-MD5 %q), want %q", gotBody, gotLen, gotMD5, need)
+	}
+}
+
+// A file the walk cannot read fails the load rather than being dropped.
+func TestLocalCookbookFromDir_UnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{"metadata.rb": "name 'nginx'\n", "recipes/default.rb": "x\n"})
+	if err := os.Chmod(filepath.Join(root, "recipes", "default.rb"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LocalCookbookFromDir(root, "1.0.0"); err == nil {
+		t.Fatal("expected an error for an unreadable cookbook file")
+	}
+}
+
 func TestCookbooks_ListLatest(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("GET /organizations/o/cookbooks/_latest", cinctest.Route{
@@ -885,9 +953,9 @@ func TestLocalCookbookFromDir_SkipsSymlinkOutsideCookbook(t *testing.T) {
 	}
 	for _, f := range cb.files {
 		if f.name == "leak.rb" {
-			t.Errorf("packed symlink leak.rb with content %q", f.content)
+			t.Errorf("packed symlink leak.rb (%s)", f.path)
 		}
-		if strings.Contains(string(f.content), "PRIVATE KEY MATERIAL") {
+		if f.checksum == md5Hex([]byte("PRIVATE KEY MATERIAL")) {
 			t.Errorf("file %s carries content from outside the cookbook", f.name)
 		}
 	}
