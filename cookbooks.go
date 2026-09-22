@@ -140,13 +140,19 @@ func (cb *Cookbook) AllFiles() []CookbookFileRef {
 }
 
 // cookbookFile is one file belonging to a cookbook being uploaded.
+// Only the path and checksum are kept: content is streamed from disk at upload
+// time, and only for files the sandbox says the server lacks.
 type cookbookFile struct {
 	name     string // path relative to the cookbook root, e.g. recipes/default.rb
-	content  []byte
+	path     string // path on disk
 	checksum string // hex MD5
 }
 
-// LocalCookbook is a cookbook assembled from disk, ready to upload.
+// LocalCookbook is a cookbook assembled from disk, ready to upload. It
+// records each file's path and checksum, not its content, so the files must
+// still be on disk, unchanged, when it is uploaded; a file edited in between
+// fails the upload's Content-MD5 check rather than sending new bytes under the
+// old checksum.
 // When Identifier is set the manifest is emitted as a cookbook artifact
 // version (chef_type "cookbook_artifact_version") rather than a plain version.
 type LocalCookbook struct {
@@ -355,8 +361,8 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	// Collect the files the server actually needs, deduped by checksum so two
 	// files with identical content don't both PUT to the same pre-signed URL.
 	type uploadJob struct {
-		url, name string
-		content   []byte
+		url  string
+		file cookbookFile
 	}
 	seen := make(map[string]bool, len(cb.files))
 	var jobs []uploadJob
@@ -366,12 +372,12 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 			continue
 		}
 		seen[f.checksum] = true
-		jobs = append(jobs, uploadJob{url: entry.URL, name: f.name, content: f.content})
+		jobs = append(jobs, uploadJob{url: entry.URL, file: f})
 	}
 	// Uploads are independent and latency-bound; run them in parallel.
 	if err := parallelForEach(ctx, jobs, func(ctx context.Context, j uploadJob) error {
-		if err := c.uploadFile(ctx, j.url, j.content); err != nil {
-			return fmt.Errorf("cinc: upload %s: %w", j.name, err)
+		if err := c.uploadFile(ctx, j.url, j.file); err != nil {
+			return fmt.Errorf("cinc: upload %s: %w", j.file.name, err)
 		}
 		return nil
 	}); err != nil {
@@ -492,7 +498,8 @@ func manifestFileName(rel string) (name, specificity string) {
 // dir. version is the version to upload as; when empty the metadata's version
 // is used, and failing that Chef's default of "0.0.0". A version that differs
 // from the one the metadata declares is an error, since the server would
-// reject the mismatch. Every remaining regular file is read and checksummed.
+// reject the mismatch. Every remaining regular file is checksummed as it is
+// read; its content is not kept, but streamed from disk again by the upload.
 // An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	md, err := loadCookbookMetadata(dir)
@@ -540,19 +547,19 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 			return nil
 		}
 		// Only regular files belong in a cookbook. WalkDir does not follow
-		// symlinks but os.ReadFile does, so without this an entry symlinked
+		// symlinks but os.Open does, so without this an entry symlinked
 		// out of the cookbook would be uploaded with its target's content,
 		// and a dangling one would abort the whole walk.
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		content, err := os.ReadFile(path)
+		// Stream the file through MD5 rather than holding it: the content is
+		// read again at upload time only if the server turns out to need it.
+		sum, err := fileMD5Hex(path)
 		if err != nil {
 			return err
 		}
-		cb.files = append(cb.files, cookbookFile{
-			name: rel, content: content, checksum: md5Hex(content),
-		})
+		cb.files = append(cb.files, cookbookFile{name: rel, path: path, checksum: sum})
 		return nil
 	})
 	if err != nil {

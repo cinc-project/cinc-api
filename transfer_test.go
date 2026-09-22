@@ -85,7 +85,7 @@ func TestUploadFile_RetriesTransientFailures(t *testing.T) {
 			c := newTestClient(t, shelf.Server)
 			sleeps := recordSleeps(c)
 
-			if err := c.uploadFile(context.Background(), shelf.URL+"/bookshelf/x", []byte("hello")); err != nil {
+			if err := c.uploadFile(context.Background(), shelf.URL+"/bookshelf/x", tempCookbookFile(t, "hello")); err != nil {
 				t.Fatalf("uploadFile: %v", err)
 			}
 			if got, want := int(shelf.attempts.Load()), len(tc.failures)+1; got != want {
@@ -99,7 +99,7 @@ func TestUploadFile_RetriesTransientFailures(t *testing.T) {
 				if b != "hello" {
 					t.Errorf("attempt %d body = %q, want %q", i+1, b, "hello")
 				}
-				if shelf.md5s[i] != md5Base64([]byte("hello")) {
+				if shelf.md5s[i] != md5HexToBase64Must(t, md5Hex([]byte("hello"))) {
 					t.Errorf("attempt %d Content-MD5 = %q", i+1, shelf.md5s[i])
 				}
 			}
@@ -112,7 +112,7 @@ func TestUploadFile_GivesUpAfterMaxRetries(t *testing.T) {
 	c := newTestClient(t, shelf.Server)
 	recordSleeps(c)
 
-	err := c.uploadFile(context.Background(), shelf.URL+"/x", []byte("hello"))
+	err := c.uploadFile(context.Background(), shelf.URL+"/x", tempCookbookFile(t, "hello"))
 	var er *ErrorResponse
 	if !errors.As(err, &er) || er.StatusCode != 500 {
 		t.Fatalf("err = %v, want the final 500", err)
@@ -127,7 +127,7 @@ func TestUploadFile_DoesNotRetryClientErrors(t *testing.T) {
 	c := newTestClient(t, shelf.Server)
 	sleeps := recordSleeps(c)
 
-	if err := c.uploadFile(context.Background(), shelf.URL+"/x", []byte("hello")); err == nil {
+	if err := c.uploadFile(context.Background(), shelf.URL+"/x", tempCookbookFile(t, "hello")); err == nil {
 		t.Fatal("want the 403")
 	}
 	if got := shelf.attempts.Load(); got != 1 || len(*sleeps) != 0 {
@@ -140,7 +140,7 @@ func TestUploadFile_HonoursMaxRetriesZero(t *testing.T) {
 	c := newTestClient(t, shelf.Server)
 	c.opts.maxRetries = 0
 
-	if err := c.uploadFile(context.Background(), shelf.URL+"/x", []byte("hello")); err == nil {
+	if err := c.uploadFile(context.Background(), shelf.URL+"/x", tempCookbookFile(t, "hello")); err == nil {
 		t.Fatal("want the 503 with retries disabled")
 	}
 	if got := shelf.attempts.Load(); got != 1 {
@@ -153,7 +153,7 @@ func TestUploadFile_CancelledBackoffStopsRetrying(t *testing.T) {
 	c := newTestClient(t, shelf.Server)
 	c.sleep = func(context.Context, time.Duration) bool { return false }
 
-	if err := c.uploadFile(context.Background(), shelf.URL+"/x", []byte("hello")); err == nil {
+	if err := c.uploadFile(context.Background(), shelf.URL+"/x", tempCookbookFile(t, "hello")); err == nil {
 		t.Fatal("want the 503")
 	}
 	if got := shelf.attempts.Load(); got != 1 {
@@ -251,7 +251,7 @@ func TestTransfer_NotBoundByAPITimeout(t *testing.T) {
 	if err := c.downloadFile(context.Background(), shelf.URL+"/f", dest, ""); err != nil {
 		t.Fatalf("download bounded by the 50ms API timeout: %v", err)
 	}
-	if err := c.uploadFile(context.Background(), shelf.URL+"/f", []byte("x")); err != nil {
+	if err := c.uploadFile(context.Background(), shelf.URL+"/f", tempCookbookFile(t, "x")); err != nil {
 		t.Fatalf("upload bounded by the 50ms API timeout: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/md5" //nolint:gosec // required by Chef's sandbox checksum protocol
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -32,15 +33,17 @@ func fileMD5Hex(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// md5Hex returns the lower-case hex MD5 digest of data.
-func md5Hex(data []byte) string {
-	sum := md5.Sum(data) //nolint:gosec // see the note on the import
-	return hex.EncodeToString(sum[:])
-}
-
-// md5Base64 returns the base64-encoded MD5 digest of data, as Chef sandboxes
-// expect in the Content-MD5 header.
-func md5Base64(data []byte) string {
-	sum := md5.Sum(data) //nolint:gosec // see the note on the import
-	return base64.StdEncoding.EncodeToString(sum[:])
+// md5HexToBase64 re-encodes a hex MD5 digest as base64, the form Chef
+// sandboxes expect in the Content-MD5 header. Both encode the same 16 bytes,
+// so an upload derives the header from the checksum taken when the cookbook
+// was walked instead of hashing the file again.
+func md5HexToBase64(hexSum string) (string, error) {
+	sum, err := hex.DecodeString(hexSum)
+	if err != nil {
+		return "", fmt.Errorf("checksum %q: %w", hexSum, err)
+	}
+	if len(sum) != md5.Size {
+		return "", fmt.Errorf("checksum %q is not an MD5 digest", hexSum)
+	}
+	return base64.StdEncoding.EncodeToString(sum), nil
 }
