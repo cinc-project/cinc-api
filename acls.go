@@ -149,14 +149,15 @@ func (s *ACLsService) SetPermission(ctx context.Context, objectType, name, perm 
 }
 
 // GetOrg returns the ACL of the organization object itself, served at
-// /organizations/ORG/_acl (no object-type segment).
+// /organizations/ORG/organizations/_acl.
 func (s *ACLsService) GetOrg(ctx context.Context) (*ACL, *Response, error) {
-	return s.getACL(ctx, "/organizations/"+esc(s.client.org))
+	return s.getACL(ctx, s.client.orgPath("organizations"))
 }
 
-// SetOrgPermission rewrites one permission's ACE on the organization object.
+// SetOrgPermission rewrites one permission's ACE on the organization object,
+// at /organizations/ORG/organizations/_acl/PERM.
 func (s *ACLsService) SetOrgPermission(ctx context.Context, perm string, ace *ACE) error {
-	return s.setACL(ctx, "/organizations/"+s.client.org, perm, ace)
+	return s.setACL(ctx, s.client.orgPath("organizations"), perm, ace)
 }
 
 // GetUser returns the ACL of a global user object. User ACLs are top-level
