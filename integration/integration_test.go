@@ -1,5 +1,5 @@
 // Package integration drives the public cinc-api client against an in-memory
-// cinc-zero Chef Infra Server. Unlike the unit tests (which use the cinctest
+// cinc-server-ng Chef Infra Server. Unlike the unit tests (which use the cinctest
 // fake), these exercise the full signed-request path end to end against a real
 // server implementation: Mixlib v1.3 auth verification, JSON wire formats,
 // status codes, and the error mapping in do[T].
@@ -13,10 +13,10 @@ import (
 	"time"
 
 	cinc "github.com/cinc-project/cinc-api"
-	"github.com/tas50/cinc-zero/server"
+	"github.com/cinc-project/cinc-server-ng/server"
 )
 
-// newClient starts an in-memory cinc-zero server (org "test", auth on) and
+// newClient starts an in-memory cinc-server-ng server (org "test", auth on) and
 // returns a cinc client authenticated as the bootstrap admin. The server is
 // torn down on test cleanup.
 func newClient(t *testing.T) *cinc.Client {
@@ -127,7 +127,7 @@ func TestIntegration_Search(t *testing.T) {
 	}
 }
 
-// cinc-zero generates a client key even without create_key, so this confirms
+// cinc-server-ng generates a client key even without create_key, so this confirms
 // the request shape is accepted end to end rather than proving the key is
 // requested — the unit tests assert create_key is on the wire.
 func TestIntegration_ClientLifecycle(t *testing.T) {

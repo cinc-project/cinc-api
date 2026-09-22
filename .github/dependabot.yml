@@ -10,6 +10,19 @@ updates:
         patterns:
           - "*"
 
+  # integration/ is a separate Go module (it holds the cinc-server-ng test
+  # server, so that dependency never reaches the root module), and Dependabot
+  # only updates the directories listed here.
+  - package-ecosystem: gomod
+    directory: /integration
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      integration-dependencies:
+        patterns:
+          - "*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

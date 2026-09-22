@@ -36,30 +36,31 @@ commands and PR conventions).
   including the test-only `cinctest` package use
   `go test ./... -coverpkg=./... -coverprofile=...`.
 - **Integration tests live in `integration/`, a *separate* Go module**
-  (its own `go.mod`, so the cinc-zero test dependency never reaches
+  (its own `go.mod`, so the cinc-server-ng test dependency never reaches
   consumers of this package — the root import stays zero-dependency).
   The root `go test ./...` does **not** run them. Run them with
   `cd integration && go test ./...` (~1s); they boot an in-memory
-  cinc-zero server and exercise the real wire protocol end-to-end,
+  cinc-server-ng server and exercise the real wire protocol end-to-end,
   unlike the `cinctest` fake the unit tests use. Run them when you
   touch the transport, signing, or cookbook-upload paths.
 
 ## What the test doubles do not cover
 
 Both suites can be green while the wire contract is wrong. Known gaps, each
-of which has hidden a real bug:
+of which has hidden a real bug (all re-checked against cinc-server-ng v0.12.0,
+formerly `tas50/cinc-zero`; file new ones at cinc-project/cinc-server-ng):
 
-- **cinc-zero** returns only `all_files` on a cookbook GET (never the
+- **cinc-server-ng** returns only `all_files` on a cookbook GET (never the
   per-segment slices), accepts `run_list: null`, and populates both `name`
   and `groupname` on a group GET. A real Chef Server is stricter or shaped
   differently on all three.
-- **cinc-zero** serves the organization's own ACL at
+- **cinc-server-ng** serves the organization's own ACL at
   `/organizations/O/_acl[/PERM]` and 404s the real erchef route,
   `/organizations/O/organizations/_acl[/PERM]`, so `ACLs.GetOrg` and
   `SetOrgPermission` have no integration coverage. Real erchef has no route
   for the 3-segment form (its deprecated `'*'` fallback needs a segment
   there, and there is none at all for `/_acl/PERM`).
-- **cinc-zero** generates a client key on `POST /clients` even without
+- **cinc-server-ng** generates a client key on `POST /clients` even without
   `create_key`. Real erchef under API v1 creates a keyless client (no
   `chef_key` in the response, no `default` key) unless `create_key: true`
   or `public_key` is sent.

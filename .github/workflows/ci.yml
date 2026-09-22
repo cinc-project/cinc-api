@@ -13,9 +13,9 @@ jobs:
       - run: go test -race -coverprofile=coverage.out ./...
 
   integration:
-    # End-to-end tests of the public client against an in-memory cinc-zero
+    # End-to-end tests of the public client against an in-memory cinc-server-ng
     # Chef Infra Server. Lives in a separate Go module (./integration) so the
-    # cinc-zero dependency never reaches the root module's consumers.
+    # cinc-server-ng dependency never reaches the root module's consumers.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
