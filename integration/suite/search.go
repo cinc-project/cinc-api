@@ -10,7 +10,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testSearchQuery(t *testing.T, c *cinc.Client) {
+func testSearchQuery(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	want := map[string]bool{}
 	for range 3 {

@@ -7,7 +7,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testClientLifecycle(t *testing.T, c *cinc.Client) {
+func testClientLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	name := uniqueName(t, "client")
 	cleanup(t, "client "+name, func(ctx context.Context) error {

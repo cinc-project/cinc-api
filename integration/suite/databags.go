@@ -10,7 +10,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testDataBagLifecycle(t *testing.T, c *cinc.Client) {
+func testDataBagLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	bag := newDataBag(t, c)
 	items := c.DataBags.Items(bag)
@@ -79,7 +79,7 @@ func testDataBagLifecycle(t *testing.T, c *cinc.Client) {
 // testDataBagEncryptedRoundTrip stores an item encrypted by this client
 // (format version 3) and checks that both the item the server echoes back and
 // the item read later decrypt to the original values.
-func testDataBagEncryptedRoundTrip(t *testing.T, c *cinc.Client) {
+func testDataBagEncryptedRoundTrip(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	items := c.DataBags.Items(newDataBag(t, c))
 	secret := []byte(randomHex(t, 32))
@@ -136,7 +136,7 @@ var chefEncryptedHelloWorld = map[string]string{
 	"v3": `{"encrypted_data":"tmPS0vwip+VU5tXd23ekJIGw0CrikuoKeZGm1mqD\n","iv":"ckznCKqh5nUXxHXB\n","auth_tag":"M5LttZ2UqwNvEWLVRwbAeA==\n","version":3,"cipher":"aes-256-gcm"}`,
 }
 
-func testDataBagChefEncryptedFormats(t *testing.T, c *cinc.Client) {
+func testDataBagChefEncryptedFormats(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	items := c.DataBags.Items(newDataBag(t, c))
 	for version, raw := range chefEncryptedHelloWorld {

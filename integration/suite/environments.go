@@ -9,7 +9,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testEnvironmentLifecycle(t *testing.T, c *cinc.Client) {
+func testEnvironmentLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	env := uniqueName(t, "env")
 	node := uniqueName(t, "node")
@@ -89,7 +89,7 @@ func testEnvironmentLifecycle(t *testing.T, c *cinc.Client) {
 
 // testEnvironmentDefaultReadOnly checks that the _default environment exists
 // and cannot be modified: a Chef server answers a PUT to it with 405.
-func testEnvironmentDefaultReadOnly(t *testing.T, c *cinc.Client) {
+func testEnvironmentDefaultReadOnly(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	def, _, err := c.Environments.Get(ctx, "_default")
 	if err != nil {
