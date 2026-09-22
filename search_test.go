@@ -4,6 +4,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -223,6 +224,146 @@ func TestSearch_All(t *testing.T) {
 	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*", WithRows(2))
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("SearchAll: %d rows, %v", len(rows), err)
+	}
+}
+
+// pagedSearchServer serves totalRows rows ({"idx":N}) in pages honouring the
+// start/rows query parameters, and reports the start of every request.
+func pagedSearchServer(t *testing.T, totalRows int, onRequest func(start int)) *Client {
+	t.Helper()
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ops-Authorization-1") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var start, rows int
+		fmt.Sscanf(r.URL.Query().Get("start"), "%d", &start)
+		fmt.Sscanf(r.URL.Query().Get("rows"), "%d", &rows)
+		onRequest(start)
+		out := []json.RawMessage{}
+		for i := start; i < start+rows && i < totalRows; i++ {
+			out = append(out, json.RawMessage(fmt.Sprintf(`{"idx":%d}`, i)))
+		}
+		json.NewEncoder(w).Encode(SearchResult{Total: totalRows, Start: start, Rows: out})
+	})
+	return newTestClient(t, srv.Server)
+}
+
+func TestSearch_AllIter(t *testing.T) {
+	var starts []int
+	c := pagedSearchServer(t, 7, func(s int) { starts = append(starts, s) })
+
+	var got []int
+	for row, err := range c.Search.All(context.Background(), "node", "*:*",
+		WithStart(1), WithRows(3)) {
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		var v struct{ Idx int }
+		if err := json.Unmarshal(row, &v); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got = append(got, v.Idx)
+	}
+	if fmt.Sprint(got) != "[1 2 3 4 5 6]" {
+		t.Errorf("rows = %v, want [1 2 3 4 5 6]", got)
+	}
+	if fmt.Sprint(starts) != "[1 4]" {
+		t.Errorf("page starts = %v, want [1 4]", starts)
+	}
+}
+
+// TestSearch_AllIter_BreakStopsPaging verifies that breaking out of the loop
+// stops further page requests: only the page holding the row we stopped on
+// is fetched.
+func TestSearch_AllIter_BreakStopsPaging(t *testing.T) {
+	requests := 0
+	c := pagedSearchServer(t, 100, func(int) { requests++ })
+
+	seen := 0
+	for _, err := range c.Search.All(context.Background(), "node", "*:*", WithRows(10)) {
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		seen++
+		if seen == 12 { // second row of the second page
+			break
+		}
+	}
+	if requests != 2 {
+		t.Errorf("page requests = %d, want 2 (no fetch after break)", requests)
+	}
+}
+
+func TestSearch_AllIter_Error(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node",
+		cinctest.Route{Status: 404, Body: `{"error":["no index"]}`})
+	c := newTestClient(t, srv.Server)
+
+	n := 0
+	for row, err := range c.Search.All(context.Background(), "node", "*:*") {
+		n++
+		if err == nil || row != nil {
+			t.Fatalf("got row %s, err %v; want nil row and an error", row, err)
+		}
+	}
+	if n != 1 {
+		t.Errorf("iterations = %d, want exactly 1 (the error)", n)
+	}
+}
+
+// TestSearch_AllIter_ContextCancel verifies that cancelling ctx mid-iteration
+// stops paging and surfaces the context error.
+func TestSearch_AllIter_ContextCancel(t *testing.T) {
+	requests := 0
+	c := pagedSearchServer(t, 100, func(int) { requests++ })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var lastErr error
+	rows := 0
+	for _, err := range c.Search.All(ctx, "node", "*:*", WithRows(10)) {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		rows++
+		if rows == 10 {
+			cancel() // before the second page is requested
+		}
+	}
+	if !errors.Is(lastErr, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", lastErr)
+	}
+	if requests != 1 || rows != 10 {
+		t.Errorf("requests = %d, rows = %d; want 1 and 10", requests, rows)
+	}
+}
+
+func TestSearch_AllIter_Partial(t *testing.T) {
+	var methods []string
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ops-Authorization-1") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		methods = append(methods, r.Method)
+		w.Write([]byte(`{"total":1,"start":0,"rows":[{"data":{"ip":"10.0.0.1"}}]}`))
+	})
+	c := newTestClient(t, srv.Server)
+	n := 0
+	for _, err := range c.Search.All(context.Background(), "node", "*:*",
+		WithPartial(map[string][]string{"ip": {"ipaddress"}})) {
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		n++
+	}
+	if n != 1 || fmt.Sprint(methods) != "[POST]" {
+		t.Errorf("rows = %d, methods = %v; want 1 row via [POST]", n, methods)
 	}
 }
 

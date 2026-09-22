@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"iter"
 	"net/url"
 	"strconv"
 )
@@ -65,22 +66,45 @@ func (s *SearchService) Query(ctx context.Context, index, query string, opts ...
 	return ptrOrNil(res, err), resp, err
 }
 
+// All returns an iterator over every row matching query, fetching one page
+// at a time so only the current page is held in memory:
+//
+//	for row, err := range c.Search.All(ctx, "node", "*:*") {
+//		if err != nil {
+//			return err
+//		}
+//		// decode row
+//	}
+//
+// Breaking out of the loop stops further page requests. A failed page
+// request (including ctx cancellation) is yielded once as a nil row with a
+// non-nil error, after which iteration ends. Options and paging behave as in
+// SearchAll.
+func (s *SearchService) All(ctx context.Context, index, query string, opts ...SearchOption) iter.Seq2[json.RawMessage, error] {
+	return func(yield func(json.RawMessage, error) bool) {
+		err := s.eachPage(ctx, index, query, opts, func(res *SearchResult, _ int) bool {
+			for _, row := range res.Rows {
+				if !yield(row, nil) {
+					return false
+				}
+			}
+			return true
+		})
+		if err != nil {
+			yield(nil, err)
+		}
+	}
+}
+
 // SearchAll pages through every result, returning all rows.
 // WithStart(n) is respected as the absolute offset of the first row to fetch;
 // subsequent pages advance the offset by the number of rows received per page.
+//
+// SearchAll holds the whole result set in memory; use All to process rows
+// page by page instead.
 func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts ...SearchOption) ([]json.RawMessage, error) {
-	p := searchParams{rows: 1000}
-	for _, o := range opts {
-		o(&p)
-	}
 	var all []json.RawMessage
-	offset := p.start
-	for {
-		res, _, err := s.Query(ctx, index, query,
-			WithStart(offset), WithRows(p.rows), WithPartial(p.partial))
-		if err != nil {
-			return nil, err
-		}
+	err := s.eachPage(ctx, index, query, opts, func(res *SearchResult, offset int) bool {
 		if all == nil {
 			// Preallocate from the server-reported total so paging through a
 			// large result set doesn't repeatedly regrow and copy the slice.
@@ -96,9 +120,35 @@ func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts
 			}
 		}
 		all = append(all, res.Rows...)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	return all, nil
+}
+
+// eachPage is the single paging loop behind All and SearchAll. It requests
+// successive pages and calls fn with each one and the offset it was
+// requested at; fn returns false to stop without fetching further pages.
+func (s *SearchService) eachPage(ctx context.Context, index, query string, opts []SearchOption, fn func(res *SearchResult, offset int) bool) error {
+	p := searchParams{rows: 1000}
+	for _, o := range opts {
+		o(&p)
+	}
+	offset := p.start
+	for {
+		res, _, err := s.Query(ctx, index, query,
+			WithStart(offset), WithRows(p.rows), WithPartial(p.partial))
+		if err != nil {
+			return err
+		}
+		if !fn(res, offset) {
+			return nil
+		}
 		offset += len(res.Rows)
 		if len(res.Rows) == 0 || offset >= res.Total {
-			return all, nil
+			return nil
 		}
 	}
 }
