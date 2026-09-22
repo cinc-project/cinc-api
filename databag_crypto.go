@@ -50,7 +50,8 @@ const jsonWrapperKey = "json_wrapper"
 
 // IsEncrypted reports whether every non-"id" top-level value is a well-formed
 // encryption wrapper. An empty item, or one containing only "id", is not
-// considered encrypted.
+// considered encrypted. Plaintext "chef_type" and "data_bag" values, which a
+// Chef Server adds to the items it echoes back, are ignored, as Chef does.
 func (i DataBagItem) IsEncrypted() bool {
 	seen := false
 	for k, v := range i {
@@ -58,6 +59,9 @@ func (i DataBagItem) IsEncrypted() bool {
 			continue
 		}
 		if _, err := parseWrapper(v); err != nil {
+			if isServerItemKey(k) {
+				continue
+			}
 			return false
 		}
 		seen = true
@@ -95,6 +99,10 @@ func (i DataBagItem) Encrypt(secret []byte) (DataBagItem, error) {
 // other top-level value is treated as an encryption wrapper and decrypted. It
 // reads wrapper versions 1, 2, and 3. The receiver is not modified.
 //
+// Plaintext "chef_type" and "data_bag" values (added by a Chef Server to the
+// items it echoes back) are dropped rather than rejected, as Chef does; an
+// encrypted value under either name is decrypted like any other.
+//
 // A value that is not a valid wrapper yields an ErrNotEncrypted error (so a
 // caller can distinguish "this item isn't encrypted"); a failed authentication
 // (wrong secret, tampering, bad HMAC) yields an ErrDataBagAuth error.
@@ -107,6 +115,9 @@ func (i DataBagItem) Decrypt(secret []byte) (DataBagItem, error) {
 		}
 		w, err := parseWrapper(v)
 		if err != nil {
+			if isServerItemKey(k) {
+				continue
+			}
 			return nil, fmt.Errorf("cinc: decrypting %q: %w", k, err)
 		}
 		pt, err := w.decrypt(secret)
@@ -116,6 +127,13 @@ func (i DataBagItem) Decrypt(secret []byte) (DataBagItem, error) {
 		out[k] = pt
 	}
 	return out, nil
+}
+
+// isServerItemKey reports whether k is one of the keys a Chef Server adds to
+// a data bag item it echoes back (see serverItemKeys). Chef's
+// DataBagItem.from_hash discards both before the encrypted-item reader runs.
+func isServerItemKey(k string) bool {
+	return k == serverItemKeys[0] || k == serverItemKeys[1]
 }
 
 // wrapper is a parsed encrypted-value envelope.

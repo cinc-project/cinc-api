@@ -273,3 +273,55 @@ func TestDataBagItem_IsEncrypted(t *testing.T) {
 		})
 	}
 }
+
+// Items that picked up erchef's "chef_type"/"data_bag" keys (from a POST/PUT
+// response, or stored permanently because such an item was PUT back) must
+// still be recognised and decrypted, as Chef's own reader does: Ruby's
+// DataBagItem.from_hash drops both keys before EncryptedDataBagItem sees them.
+func TestDecrypt_IgnoresServerAddedKeys(t *testing.T) {
+	secret := []byte("s3cret")
+	enc, err := DataBagItem{"id": "db", "password": "hunter2"}.Encrypt(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc["chef_type"] = "data_bag_item"
+	enc["data_bag"] = "creds"
+
+	if !enc.IsEncrypted() {
+		t.Error("IsEncrypted = false for an encrypted item carrying server keys")
+	}
+	got, err := enc.Decrypt(secret)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	want := DataBagItem{"id": "db", "password": "hunter2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Decrypt = %v, want %v", got, want)
+	}
+
+	// The server keys alone do not make an item encrypted.
+	if (DataBagItem{"id": "db", "chef_type": "data_bag_item", "data_bag": "creds"}).IsEncrypted() {
+		t.Error("IsEncrypted = true for an item with only id and server keys")
+	}
+}
+
+// An item that legitimately has "data_bag"/"chef_type" keys is encrypted like
+// any other, and Decrypt returns them: an encrypted value is real data.
+func TestDecrypt_EncryptedServerKeyNamesRoundTrip(t *testing.T) {
+	secret := []byte("s3cret")
+	in := DataBagItem{"id": "db", "data_bag": "mine", "chef_type": "x"}
+	enc, err := in.Encrypt(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enc.IsEncrypted() {
+		t.Error("IsEncrypted = false")
+	}
+	got, err := enc.Decrypt(secret)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("Decrypt = %v, want %v", got, in)
+	}
+}
