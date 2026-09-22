@@ -39,7 +39,7 @@ func SignHeaders(r Request, key *rsa.PrivateKey) (http.Header, error) {
 	h.Set("X-Ops-UserId", r.UserID)
 	h.Set("X-Ops-Timestamp", r.Timestamp)
 	h.Set("X-Ops-Content-Hash", contentHash)
-	h.Set("X-Ops-Server-API-Version", ServerAPIVersion)
+	h.Set("X-Ops-Server-API-Version", r.apiVersion())
 	for i, chunk := range chunk60(base64.StdEncoding.EncodeToString(sig)) {
 		h.Set("X-Ops-Authorization-"+strconv.Itoa(i+1), chunk)
 	}

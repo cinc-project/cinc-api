@@ -99,6 +99,19 @@ model, so callers don't re-encode server conventions:
   a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
   skips dot-directories at the cookbook root and takes the cookbook name from
   `metadata.json` / `metadata.rb` rather than the directory name.
+- `LocalCookbookFromDir(dir, version)` — load a cookbook for
+  `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
+  (a `CookbookMetadata`: name, version, description, maintainer, license,
+  dependencies, platforms, chef/ohai versions, …) is sent as the manifest's
+  `metadata` block, which Chef Server requires and chef-client reads. It is
+  filled from `metadata.json` when present, otherwise from the literal calls
+  in `metadata.rb` (`name`, `version`, `description`, `long_description`,
+  `maintainer`, `maintainer_email`, `license`, `source_url`, `issues_url`,
+  `depends`, `supports`, `chef_version`, `ohai_version`, `privacy`, each on
+  one line with string literal arguments); metadata.rb is Ruby and is never
+  evaluated, so anything computed there needs a `metadata.json` or an edit to
+  `Metadata`. An empty `version` uses the metadata's version; one that
+  disagrees with it is an error.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands

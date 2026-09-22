@@ -1,6 +1,7 @@
 package cinc
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rsa"
@@ -34,17 +35,21 @@ func verifySignature(t *testing.T, r *http.Request, key *rsa.PrivateKey) {
 		t.Fatalf("decode signature: %v", err)
 	}
 	// The body is part of the signed content hash, so a PUT or POST can only
-	// verify if it is hashed too. This consumes r.Body.
+	// verify if it is hashed too. It is put back for the caller.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	canonical := signing.CanonicalRequest(signing.Request{
 		Method:    r.Method,
 		Path:      r.URL.EscapedPath(),
 		Body:      body,
 		UserID:    r.Header.Get("X-Ops-Userid"),
 		Timestamp: r.Header.Get("X-Ops-Timestamp"),
+		// erchef checks the signature against whichever API version the
+		// request asked for.
+		APIVersion: r.Header.Get("X-Ops-Server-API-Version"),
 	})
 	digest := sha256.Sum256([]byte(canonical))
 	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], raw); err != nil {

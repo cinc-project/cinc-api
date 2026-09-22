@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -425,37 +426,257 @@ func TestLocalCookbookFromDir_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestCookbookManifest_VersionVariant(t *testing.T) {
-	cb := &LocalCookbook{Name: "n", Version: "1.0.0", files: []cookbookFile{
-		{name: "recipes/default.rb", checksum: "abc"},
-	}}
-	m := cookbookManifest(cb)
-	if m["chef_type"] != "cookbook_version" {
-		t.Errorf("chef_type = %v, want cookbook_version", m["chef_type"])
+// manifestFixture is a cookbook exercising every file-naming rule in Chef's
+// CookbookManifest#parse_file_from_root_paths.
+var manifestFixture = map[string]string{
+	"metadata.rb": "name 'web'\nversion '1.2.0'\ndescription 'Web server'\n" +
+		"depends 'apt'\ndepends 'nginx', '~> 2.0'\n",
+	"README.md":                            "# web\n",
+	"attributes/default.rb":                "default['web']['port'] = 80\n",
+	"files/default/ssl/cert.pem":           "cert\n",
+	"libraries/helpers.rb":                 "module Web; end\n",
+	"recipes/default.rb":                   "package 'nginx'\n",
+	"recipes/sub/helper.rb":                "# helper\n",
+	"templates/nginx.conf.erb":             "listen 80;\n",
+	"templates/ubuntu/site.erb":            "site\n",
+	"test/integration/default/web_test.rb": "describe port(80)\n",
+}
+
+// wantManifestFiles is the all_files list Chef would build for
+// manifestFixture, in the loader's (lexical) walk order. Per
+// parse_file_from_root_paths (chef lib/chef/cookbook_manifest.rb):
+//   - a file at the cookbook root is named "root_files/<file>";
+//   - anything deeper is named "<first dir>/<basename>" — intermediate
+//     directories are dropped from the name but kept in the path;
+//   - under templates/ and files/, a file directly in the segment has
+//     specificity "root_default", otherwise the next directory is the
+//     specificity; everything else is "default".
+func wantManifestFiles() []any {
+	entry := func(name, path, specificity string) any {
+		return map[string]any{"name": name, "path": path, "specificity": specificity,
+			"checksum": md5Hex([]byte(manifestFixture[path]))}
 	}
-	if m["version"] != "1.0.0" {
-		t.Errorf("version = %v, want 1.0.0", m["version"])
-	}
-	if _, ok := m["identifier"]; ok {
-		t.Error("plain version manifest should not include identifier")
-	}
-	if name, _ := m["name"].(string); name != "n-1.0.0" {
-		t.Errorf("name = %v, want n-1.0.0", m["name"])
+	return []any{
+		entry("root_files/README.md", "README.md", "default"),
+		entry("attributes/default.rb", "attributes/default.rb", "default"),
+		entry("files/cert.pem", "files/default/ssl/cert.pem", "default"),
+		entry("libraries/helpers.rb", "libraries/helpers.rb", "default"),
+		entry("root_files/metadata.rb", "metadata.rb", "default"),
+		entry("recipes/default.rb", "recipes/default.rb", "default"),
+		entry("recipes/helper.rb", "recipes/sub/helper.rb", "default"),
+		entry("templates/nginx.conf.erb", "templates/nginx.conf.erb", "root_default"),
+		entry("templates/site.erb", "templates/ubuntu/site.erb", "ubuntu"),
+		entry("test/web_test.rb", "test/integration/default/web_test.rb", "default"),
 	}
 }
 
-func TestCookbookManifest_ArtifactVariant(t *testing.T) {
-	cb := &LocalCookbook{Name: "n", Version: "1.0.0", Identifier: "abc",
-		files: []cookbookFile{{name: "recipes/default.rb", checksum: "x"}}}
-	m := cookbookManifest(cb)
-	if m["chef_type"] != "cookbook_artifact_version" {
-		t.Errorf("chef_type = %v", m["chef_type"])
+// wantManifestMetadata is Chef's metadata block for manifestFixture: erchef
+// requires metadata.version to equal the URL version, and `depends` without a
+// constraint is stored as ">= 0.0.0".
+var wantManifestMetadata = map[string]any{
+	"name": "web", "version": "1.2.0", "description": "Web server",
+	"dependencies": map[string]any{"apt": ">= 0.0.0", "nginx": "~> 2.0"},
+}
+
+// manifestJSON builds cb's manifest and round-trips it through JSON, which is
+// what the server sees.
+func manifestJSON(t *testing.T, cb *LocalCookbook) map[string]any {
+	t.Helper()
+	m, err := cookbookManifest(cb)
+	if err != nil {
+		t.Fatalf("cookbookManifest: %v", err)
 	}
-	if m["identifier"] != "abc" {
-		t.Errorf("identifier = %v", m["identifier"])
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := m["version"]; ok {
-		t.Error("artifact manifest should not include a version key")
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestCookbookManifest_MatchesChef(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "checkout")
+	writeTree(t, root, manifestFixture)
+	cb, err := LocalCookbookFromDir(root, "")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+
+	t.Run("cookbook version", func(t *testing.T) {
+		want := map[string]any{
+			"cookbook_name": "web",
+			"name":          "web-1.2.0",
+			"version":       "1.2.0",
+			"chef_type":     "cookbook_version",
+			"metadata":      wantManifestMetadata,
+			"all_files":     wantManifestFiles(),
+		}
+		if got := manifestJSON(t, cb); !reflect.DeepEqual(got, want) {
+			gotJSON, _ := json.MarshalIndent(got, "", "  ")
+			t.Fatalf("manifest =\n%s", gotJSON)
+		}
+	})
+
+	t.Run("cookbook artifact", func(t *testing.T) {
+		// chef-client's CookbookVersion.from_cb_artifact_data calls
+		// Metadata.from_hash(o["metadata"]), so an artifact needs the same
+		// metadata block; Chef's generate_manifest also sets version.
+		artifact := *cb
+		artifact.Identifier = "abc123"
+		want := map[string]any{
+			"cookbook_name": "web",
+			"name":          "web",
+			"identifier":    "abc123",
+			"version":       "1.2.0",
+			"chef_type":     "cookbook_artifact_version",
+			"metadata":      wantManifestMetadata,
+			"all_files":     wantManifestFiles(),
+		}
+		if got := manifestJSON(t, &artifact); !reflect.DeepEqual(got, want) {
+			gotJSON, _ := json.MarshalIndent(got, "", "  ")
+			t.Fatalf("manifest =\n%s", gotJSON)
+		}
+	})
+}
+
+// Callers can adjust the metadata of a loaded cookbook (or build one by hand)
+// and the manifest carries it, with name and version always matching the URL.
+func TestCookbookManifest_CallerMetadata(t *testing.T) {
+	cb := &LocalCookbook{Name: "n", Version: "1.0.0",
+		Metadata: CookbookMetadata{License: "MIT", Dependencies: map[string]string{"apt": "~> 7.0"}},
+		files:    []cookbookFile{{name: "recipes/default.rb", checksum: "abc"}}}
+	got := manifestJSON(t, cb)
+	want := map[string]any{"name": "n", "version": "1.0.0", "license": "MIT",
+		"dependencies": map[string]any{"apt": "~> 7.0"}}
+	if !reflect.DeepEqual(got["metadata"], want) {
+		t.Fatalf("metadata = %v, want %v", got["metadata"], want)
+	}
+	if cb.Metadata.Name != "" || cb.Metadata.Version != "" {
+		t.Errorf("cookbookManifest mutated the caller's metadata: %+v", cb.Metadata)
+	}
+}
+
+// erchef rejects a manifest whose metadata.version differs from the URL
+// version, so a LocalCookbook that disagrees with itself fails before any
+// request is sent.
+func TestCookbookManifest_Inconsistent(t *testing.T) {
+	cases := map[string]*LocalCookbook{
+		"metadata version": {Name: "n", Version: "1.0.0", Metadata: CookbookMetadata{Version: "2.0.0"}},
+		"metadata name":    {Name: "n", Version: "1.0.0", Metadata: CookbookMetadata{Name: "other"}},
+		"no version":       {Name: "n"},
+	}
+	for desc, cb := range cases {
+		t.Run(desc, func(t *testing.T) {
+			if _, err := cookbookManifest(cb); err == nil {
+				t.Fatal("expected an error")
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			}))
+			defer srv.Close()
+			if err := newTestClient(t, srv).Cookbooks.Upload(context.Background(), cb); err == nil {
+				t.Fatal("Upload: expected an error")
+			}
+		})
+	}
+}
+
+func TestLocalCookbookFromDir_Version(t *testing.T) {
+	cases := []struct {
+		desc, metadata, arg, want, wantErr string
+	}{
+		{"argument only", "name 'x'\n", "1.0.0", "1.0.0", ""},
+		{"metadata only", "name 'x'\nversion '2.1.0'\n", "", "2.1.0", ""},
+		{"both agree", "name 'x'\nversion '2.1.0'\n", "2.1.0", "2.1.0", ""},
+		// Chef::Cookbook::Metadata defaults version to 0.0.0.
+		{"neither", "name 'x'\n", "", "0.0.0", ""},
+		{"disagree", "name 'x'\nversion '2.1.0'\n", "3.0.0", "", `version "3.0.0" does not match metadata version "2.1.0"`},
+	}
+	for _, c := range cases {
+		t.Run(c.desc, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "x")
+			writeTree(t, root, map[string]string{"metadata.rb": c.metadata})
+			cb, err := LocalCookbookFromDir(root, c.arg)
+			if c.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("err = %v, want it to contain %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LocalCookbookFromDir: %v", err)
+			}
+			if cb.Version != c.want || cb.Metadata.Version != c.want || cb.Metadata.Name != "x" {
+				t.Fatalf("Version = %q, Metadata = %+v, want version %q", cb.Version, cb.Metadata, c.want)
+			}
+		})
+	}
+}
+
+func TestLocalCookbookFromDir_BadMetadataRb(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "x")
+	writeTree(t, root, map[string]string{"metadata.rb": "depends 'apt', 'latest'\n"})
+	if _, err := LocalCookbookFromDir(root, "1.0.0"); err == nil {
+		t.Fatal("expected an error for an invalid depends constraint")
+	}
+}
+
+// A real Chef Server validates a cookbook_version PUT against the v0 schema
+// (per-segment lists, no all_files key) unless the request negotiates server
+// API version 2, and rejects the unknown all_files key with a 400. The
+// manifest PUT must therefore ask for — and sign — version 2.
+func TestCookbooks_Upload_ManifestUsesAPIVersion2(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "web")
+	writeTree(t, root, manifestFixture)
+	cb, err := LocalCookbookFromDir(root, "1.2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := testRSAKey(t)
+	for _, tc := range []struct {
+		desc, path string
+		upload     func(*Client) error
+	}{
+		{"cookbook", "/organizations/o/cookbooks/web/1.2.0",
+			func(c *Client) error { return c.Cookbooks.Upload(context.Background(), cb) }},
+		{"artifact", "/organizations/o/cookbook_artifacts/web/abc123",
+			func(c *Client) error { return c.CookbookArtifacts.Upload(context.Background(), cb, "abc123") }},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			var sawManifest bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				version := r.Header.Get("X-Ops-Server-API-Version")
+				switch {
+				case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+					if version != "1" {
+						t.Errorf("sandbox POST API version = %q, want the default 1", version)
+					}
+					w.WriteHeader(201)
+					w.Write([]byte(`{"sandbox_id":"sb","checksums":{}}`))
+				case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb":
+					w.Write([]byte(`{}`))
+				case r.Method == "PUT" && r.URL.Path == tc.path:
+					sawManifest = true
+					if version != "2" {
+						t.Errorf("manifest PUT API version = %q, want 2", version)
+					}
+					verifySignature(t, r, key)
+					w.Write([]byte(`{}`))
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+			if err := tc.upload(newTestClient(t, srv)); err != nil {
+				t.Fatalf("upload: %v", err)
+			}
+			if !sawManifest {
+				t.Fatal("manifest was never PUT")
+			}
+		})
 	}
 }
 

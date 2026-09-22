@@ -64,6 +64,12 @@ formerly `tas50/cinc-zero`; file new ones at cinc-project/cinc-server-ng):
   `create_key`. Real erchef under API v1 creates a keyless client (no
   `chef_key` in the response, no `default` key) unless `create_key: true`
   or `public_key` is sent.
+- **cinc-server-ng** accepts a cookbook manifest with no `metadata` block,
+  with bare file names (`default.rb` instead of `recipes/default.rb`), and
+  with `all_files` at server API version 1. erchef rejects the first and
+  third with a 400 (`metadata.version` must equal the URL version;
+  `all_files` is only valid from API version 2, which is why the manifest
+  PUT asks for 2), and chef-client misfiles every entry under the second.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
