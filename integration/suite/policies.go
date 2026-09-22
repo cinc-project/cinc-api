@@ -12,7 +12,7 @@ import (
 // groups. The server answers a second PUT of an existing cookbook artifact
 // identifier with 409, so the second push only succeeds if PushRevision
 // skips artifacts the server already has.
-func testPushRevisionToTwoGroups(t *testing.T, c *cinc.Client) {
+func testPushRevisionToTwoGroups(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	policy := uniqueName(t, "policy")
 	cookbook := uniqueName(t, "cookbook")

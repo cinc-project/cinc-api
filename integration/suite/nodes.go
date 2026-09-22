@@ -8,7 +8,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testNodeLifecycle(t *testing.T, c *cinc.Client) {
+func testNodeLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	name := uniqueName(t, "node")
 	cleanup(t, "node "+name, func(ctx context.Context) error {
@@ -58,7 +58,7 @@ func testNodeLifecycle(t *testing.T, c *cinc.Client) {
 	}
 }
 
-func testNodeNotFound(t *testing.T, c *cinc.Client) {
+func testNodeNotFound(t *testing.T, _ Target, c *cinc.Client) {
 	_, _, err := c.Nodes.Get(t.Context(), uniqueName(t, "missing"))
 	if !errors.Is(err, cinc.ErrNotFound) {
 		t.Fatalf("Get missing node: err = %v, want ErrNotFound", err)

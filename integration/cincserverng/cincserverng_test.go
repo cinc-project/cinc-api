@@ -58,8 +58,14 @@ func run(m *testing.M) int {
 	cfg := cinc.Config{ServerURL: srv.URL(), Org: org, ClientName: srv.AdminName(), Key: key}
 
 	target = suite.Target{
-		Name: "cinc-server-ng",
-		Org:  org,
+		Name:  "cinc-server-ng",
+		Org:   org,
+		Admin: srv.AdminName(),
+		Gaps: map[string]string{
+			"acls/org":       "serves the org ACL at /organizations/O/_acl, not erchef's route: https://github.com/cinc-project/cinc-server-ng/issues/161",
+			"principals/get": "returns the API v0 single-object shape under v1: https://github.com/cinc-project/cinc-server-ng/issues/162",
+			"keys/rename":    "key PUT ignores a new name and drops omitted fields: https://github.com/cinc-project/cinc-server-ng/issues/163",
+		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()
 			c, err := cinc.NewClient(cfg, cinc.WithHTTPClient(hc))

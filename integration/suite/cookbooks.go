@@ -12,7 +12,7 @@ import (
 // (sandbox -> file PUTs -> manifest PUT) and the download flow, then verifies
 // every file round-trips byte-for-byte. This also exercises the parallel
 // bookshelf upload/download path end to end.
-func testCookbookUploadDownload(t *testing.T, c *cinc.Client) {
+func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	name := uniqueName(t, "cookbook")
 	cleanup(t, "cookbook "+name, func(ctx context.Context) error {
@@ -91,7 +91,7 @@ func testCookbookUploadDownload(t *testing.T, c *cinc.Client) {
 
 // testCookbookArtifactUpload uploads a content-addressed cookbook artifact
 // (Policyfile mode) and reads it back by identifier.
-func testCookbookArtifactUpload(t *testing.T, c *cinc.Client) {
+func testCookbookArtifactUpload(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	name := uniqueName(t, "artifact")
 	identifier := randomHex(t, 20)

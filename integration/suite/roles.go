@@ -9,7 +9,7 @@ import (
 	cinc "github.com/cinc-project/cinc-api"
 )
 
-func testRoleLifecycle(t *testing.T, c *cinc.Client) {
+func testRoleLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	role := uniqueName(t, "role")
 	env := uniqueName(t, "env")

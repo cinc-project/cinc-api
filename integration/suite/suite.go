@@ -24,6 +24,8 @@ type Target struct {
 	Client func(t *testing.T) *cinc.Client
 	// Org is the organization the tests create objects in.
 	Org string
+	// Admin is the user name Client authenticates as; it is a member of Org.
+	Admin string
 	// Gaps maps a case name (e.g. "nodes/lifecycle") to the reason it is
 	// skipped on this target: an upstream issue URL, or the behaviour
 	// observed. Every key must name an existing case and carry a reason.
@@ -34,7 +36,7 @@ type Target struct {
 // subtest name, so `go test -run 'Test.*/nodes/'` selects a family.
 type testCase struct {
 	name string
-	run  func(t *testing.T, c *cinc.Client)
+	run  func(t *testing.T, tgt Target, c *cinc.Client)
 }
 
 var cases = []testCase{
@@ -52,6 +54,15 @@ var cases = []testCase{
 	{"data-bags/lifecycle", testDataBagLifecycle},
 	{"data-bags/encrypted-round-trip", testDataBagEncryptedRoundTrip},
 	{"data-bags/chef-encrypted-formats", testDataBagChefEncryptedFormats},
+	{"keys/client-lifecycle", testClientKeyLifecycle},
+	{"keys/user-lifecycle", testUserKeyLifecycle},
+	{"keys/rename", testKeyRename},
+	{"groups/lifecycle", testGroupLifecycle},
+	{"containers/lifecycle", testContainerLifecycle},
+	{"acls/objects", testObjectACLs},
+	{"acls/org", testOrgACL},
+	{"acls/user", testUserACL},
+	{"principals/get", testPrincipals},
 }
 
 // Run runs every shared case against tgt as a parallel subtest, skipping the
@@ -71,7 +82,7 @@ func Run(t *testing.T, tgt Target) {
 				t.Skipf("known gap on %s: %s", tgt.Name, reason)
 			}
 			t.Parallel()
-			tc.run(t, tgt.Client(t))
+			tc.run(t, tgt, tgt.Client(t))
 		})
 	}
 }
