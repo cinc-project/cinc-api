@@ -214,9 +214,10 @@ func TestCookbooks_Download(t *testing.T) {
 			baseURL := "http://" + r.Host
 			manifest := fmt.Sprintf(`{
 				"cookbook_name":"nginx","name":"nginx-1.2.0","version":"1.2.0",
-				"recipes":[{"name":"default.rb","path":"recipes/default.rb","specificity":"default","checksum":"abc","url":"%s/files/recipes/default.rb"}],
-				"root_files":[{"name":"metadata.rb","path":"metadata.rb","specificity":"default","checksum":"def","url":"%s/files/metadata.rb"}]
-			}`, baseURL, baseURL)
+				"recipes":[{"name":"default.rb","path":"recipes/default.rb","specificity":"default","checksum":%q,"url":"%s/files/recipes/default.rb"}],
+				"root_files":[{"name":"metadata.rb","path":"metadata.rb","specificity":"default","checksum":%q,"url":"%s/files/metadata.rb"}]
+			}`, md5Hex([]byte("package 'nginx'\n")), baseURL,
+				md5Hex([]byte("name 'nginx'\nversion '1.2.0'\n")), baseURL)
 			w.Write([]byte(manifest))
 		case r.Method == "GET" && r.URL.Path == "/files/recipes/default.rb":
 			// Bookshelf: pre-signed URL — must NOT carry Chef signing header.
