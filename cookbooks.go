@@ -3,6 +3,8 @@ package cinc
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -403,12 +406,29 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
 // pass to CookbooksService.Upload (or, with an identifier,
-// CookbookArtifactsService.Upload). The cookbook name is taken from the base
-// name of dir. Every regular file under dir is read and checksummed, except
-// those excluded by a chefignore file at the cookbook root — matching knife, an
-// uploaded cookbook omits chefignored files. An empty directory is an error.
+// CookbookArtifactsService.Upload). It selects files the way Chef's
+// CookbookVersionLoader does:
+//
+//   - directories at the cookbook root whose names begin with "." (.git,
+//     .kitchen, …) are skipped; dotfiles, and dot-directories deeper down, are
+//     kept;
+//   - chef-zero's .uploaded-cookbook-version.json is skipped;
+//   - files excluded by the applicable chefignore (see LoadChefignore, which
+//     also searches parent directories) are skipped.
+//
+// The cookbook name is the `name` from metadata.json, or else from a literal
+// `name '...'` line in metadata.rb, falling back to the base name of dir when
+// neither provides one. Every remaining regular file is read and checksummed.
+// An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
-	cb := &LocalCookbook{Name: filepath.Base(dir), Version: version}
+	name, err := cookbookNameFromMetadata(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cinc: read cookbook metadata: %w", err)
+	}
+	if name == "" {
+		name = filepath.Base(dir)
+	}
+	cb := &LocalCookbook{Name: name, Version: version}
 	ignore, err := LoadChefignore(dir)
 	if err != nil {
 		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
@@ -423,14 +443,17 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			// Prune whole subtrees a chefignore pattern excludes (e.g. a bare
-			// directory name like `.kitchen`), so their files are never read.
-			if rel != "." && ignore.Ignores(rel) {
+			if rel == "." {
+				return nil
+			}
+			// Chef skips dot-directories at the cookbook root, and never needs
+			// to descend into a subtree whose every file is chefignored.
+			if (!strings.Contains(rel, "/") && strings.HasPrefix(rel, ".")) || ignore.prunes(rel) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if ignore.Ignores(rel) {
+		if d.Name() == uploadedCookbookVersionFile || ignore.Ignores(rel) {
 			return nil
 		}
 		// Only regular files belong in a cookbook. WalkDir does not follow
@@ -456,4 +479,44 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 		return nil, fmt.Errorf("cinc: no files found in %s", dir)
 	}
 	return cb, nil
+}
+
+// uploadedCookbookVersionFile is written into cookbooks by chef-zero and is
+// never part of the cookbook itself.
+const uploadedCookbookVersionFile = ".uploaded-cookbook-version.json"
+
+// metadataRbName matches a `name` call with a string literal in metadata.rb,
+// e.g. `name 'nginx'` or `name("nginx")`.
+var metadataRbName = regexp.MustCompile(`(?m)^[ \t]*name[ \t]*\(?[ \t]*(?:'([^']*)'|"([^"]*)")`)
+
+// cookbookNameFromMetadata returns the cookbook name declared in dir's
+// metadata, or "" when there is none. Like Chef, metadata.json takes
+// precedence over metadata.rb. metadata.rb is Ruby and is not evaluated; only
+// a `name` call with a literal string argument is recognized.
+func cookbookNameFromMetadata(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	switch {
+	case err == nil:
+		var md struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &md); err != nil {
+			return "", fmt.Errorf("metadata.json: %w", err)
+		}
+		return md.Name, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return "", err
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "metadata.rb"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	m := metadataRbName.FindSubmatch(data)
+	if m == nil {
+		return "", nil
+	}
+	return string(m[1]) + string(m[2]), nil
 }

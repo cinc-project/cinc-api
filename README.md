@@ -82,11 +82,14 @@ model, so callers don't re-encode server conventions:
   revision with a policy group. The lock bytes are sent verbatim so no fields
   are lost. Artifacts the server already has are skipped, so the same lock can
   be pushed to several groups and a failed push can be retried.
-- `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — knife's chefignore
-  matcher (full path, basename, and ancestor-directory globs), so cookbook
+- `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — Chef's chefignore
+  handling: the nearest `chefignore` in `dir` or any parent (so a chef-repo's
+  `cookbooks/chefignore` applies), with each pattern matched against the
+  cookbook-relative path exactly as Ruby's `File.fnmatch?` does. Cookbook
   uploads, archives, and identifier computation agree on which files belong to
-  a cookbook. `LocalCookbookFromDir` honors it, so chefignored files are
-  excluded from an upload.
+  a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
+  skips dot-directories at the cookbook root and takes the cookbook name from
+  `metadata.json` / `metadata.rb` rather than the directory name.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands

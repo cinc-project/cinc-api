@@ -746,3 +746,195 @@ func TestDownload_FetchesEachFileOnce(t *testing.T) {
 		t.Errorf("bookshelf fetches = %d, want 1", got)
 	}
 }
+
+// writeTree creates each file under root, making parent directories as needed.
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// cookbookFileNames returns the sorted cookbook-relative names in cb.
+func cookbookFileNames(cb *LocalCookbook) []string {
+	var got []string
+	for _, f := range cb.files {
+		got = append(got, f.name)
+	}
+	slices.Sort(got)
+	return got
+}
+
+func TestLocalCookbookFromDir_SkipsTopLevelDotDirs(t *testing.T) {
+	// Chef's CookbookVersionLoader#load_all_files skips directories at the
+	// cookbook root whose names begin with "." — with or without a chefignore
+	// — but keeps top-level dotfiles and dot-directories nested deeper. It also
+	// drops chef-zero's .uploaded-cookbook-version.json wherever it appears.
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{
+		"metadata.rb":                           "name 'nginx'\n",
+		".git/HEAD":                             "ref\n",
+		".kitchen/state.yml":                    "state\n",
+		".rubocop.yml":                          "rules\n",
+		"files/default/.hidden/conf":            "conf\n",
+		".uploaded-cookbook-version.json":       "{}\n",
+		"files/.uploaded-cookbook-version.json": "{}\n",
+	})
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	want := []string{".rubocop.yml", "files/default/.hidden/conf", "metadata.rb"}
+	if got := cookbookFileNames(cb); !slices.Equal(got, want) {
+		t.Fatalf("files = %v, want %v", got, want)
+	}
+}
+
+func TestLocalCookbookFromDir_UsesRepoChefignore(t *testing.T) {
+	// A chef-repo keeps one chefignore in cookbooks/, which applies to every
+	// cookbook beneath it.
+	repo := t.TempDir()
+	writeTree(t, repo, map[string]string{
+		"cookbooks/chefignore":                 "spec/*\n",
+		"cookbooks/nginx/metadata.rb":          "name 'nginx'\n",
+		"cookbooks/nginx/recipes/default.rb":   "package 'nginx'\n",
+		"cookbooks/nginx/spec/default_spec.rb": "describe\n",
+	})
+	cb, err := LocalCookbookFromDir(filepath.Join(repo, "cookbooks", "nginx"), "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	want := []string{"metadata.rb", "recipes/default.rb"}
+	if got := cookbookFileNames(cb); !slices.Equal(got, want) {
+		t.Fatalf("files = %v, want %v", got, want)
+	}
+}
+
+func TestLocalCookbookFromDir_ChefignoreMatchesRelativePathOnly(t *testing.T) {
+	// Chef matches each pattern against the cookbook-relative path, never
+	// against a basename or ancestor directory, so a root-file pattern like
+	// `Vagrantfile` must not drop a same-named file shipped under files/.
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{
+		"chefignore":                      "Vagrantfile\nREADME*\ntmp\n",
+		"metadata.rb":                     "name 'nginx'\n",
+		"Vagrantfile":                     "vm\n",
+		"README.md":                       "docs\n",
+		"files/default/Vagrantfile":       "shipped\n",
+		"templates/default/README.md.erb": "shipped\n",
+		"tmp/keep.txt":                    "kept\n",
+	})
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	want := []string{"chefignore", "files/default/Vagrantfile", "metadata.rb", "templates/default/README.md.erb", "tmp/keep.txt"}
+	if got := cookbookFileNames(cb); !slices.Equal(got, want) {
+		t.Fatalf("files = %v, want %v", got, want)
+	}
+}
+
+func TestLocalCookbookFromDir_PrunesIgnoredSubtree(t *testing.T) {
+	// A directory every descendant of which is ignored is never descended
+	// into, so an unreadable directory beneath it cannot fail the walk.
+	if os.Getuid() == 0 {
+		t.Skip("root can read any directory")
+	}
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{
+		"chefignore":       "spec/*\n",
+		"metadata.rb":      "name 'nginx'\n",
+		"spec/locked/x.rb": "x\n",
+	})
+	locked := filepath.Join(root, "spec", "locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	want := []string{"chefignore", "metadata.rb"}
+	if got := cookbookFileNames(cb); !slices.Equal(got, want) {
+		t.Fatalf("files = %v, want %v", got, want)
+	}
+}
+
+func TestLocalCookbookFromDir_ChefignoreReadError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{"metadata.rb": "name 'nginx'\n"})
+	if err := os.WriteFile(filepath.Join(root, "chefignore"), nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LocalCookbookFromDir(root, "1.0.0"); err == nil {
+		t.Fatal("expected an error for an unreadable chefignore")
+	}
+}
+
+func TestLocalCookbookFromDir_NameFromMetadata(t *testing.T) {
+	// Chef names a cookbook from its metadata and falls back to the directory
+	// name only when the metadata has none. metadata.json wins over
+	// metadata.rb when both exist.
+	cases := []struct {
+		desc  string
+		files map[string]string
+		want  string
+	}{
+		{"metadata.rb single quotes", map[string]string{"metadata.rb": "name 'realname'\nversion '1.0.0'\n"}, "realname"},
+		{"metadata.rb double quotes, parens", map[string]string{"metadata.rb": "# name 'commented'\nname(\"other\")\n"}, "other"},
+		{"metadata.rb without a literal name", map[string]string{"metadata.rb": "name File.basename(__dir__)\n"}, "checkout"},
+		{"metadata.rb without name", map[string]string{"metadata.rb": "version '1.0.0'\n"}, "checkout"},
+		{"no metadata", map[string]string{"recipes/default.rb": "x\n"}, "checkout"},
+		{"metadata.json", map[string]string{"metadata.json": `{"name":"fromjson"}`, "metadata.rb": "name 'fromrb'\n"}, "fromjson"},
+		{"metadata.json without name", map[string]string{"metadata.json": `{"version":"1.0.0"}`, "metadata.rb": "name 'fromrb'\n"}, "checkout"},
+	}
+	for _, c := range cases {
+		t.Run(c.desc, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "checkout")
+			writeTree(t, root, c.files)
+			cb, err := LocalCookbookFromDir(root, "1.0.0")
+			if err != nil {
+				t.Fatalf("LocalCookbookFromDir: %v", err)
+			}
+			if cb.Name != c.want {
+				t.Fatalf("Name = %q, want %q", cb.Name, c.want)
+			}
+		})
+	}
+}
+
+func TestLocalCookbookFromDir_InvalidMetadataJSON(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nginx")
+	writeTree(t, root, map[string]string{"metadata.json": "{not json"})
+	if _, err := LocalCookbookFromDir(root, "1.0.0"); err == nil {
+		t.Fatal("expected an error for unparseable metadata.json")
+	}
+}
+
+func TestLocalCookbookFromDir_UnreadableMetadata(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	for _, name := range []string{"metadata.json", "metadata.rb"} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "nginx")
+			writeTree(t, root, map[string]string{"recipes/default.rb": "x\n"})
+			if err := os.WriteFile(filepath.Join(root, name), nil, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LocalCookbookFromDir(root, "1.0.0"); err == nil {
+				t.Fatalf("expected an error for an unreadable %s", name)
+			}
+		})
+	}
+}
