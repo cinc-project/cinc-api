@@ -66,6 +66,16 @@ func eventually(t *testing.T, timeout time.Duration, check func() error) {
 	}
 }
 
+// uniqueContent prefixes a cookbook file's content with a comment naming the
+// cookbook, so no two tests ever upload a file with the same checksum. A Chef
+// server stores file contents once per checksum and deletes them when the
+// last cookbook referring to them is deleted, so shared content lets one
+// test's cleanup delete a file another test's sandbox was told it need not
+// upload, and that test's sandbox commit then fails.
+func uniqueContent(cookbook, content string) string {
+	return "# " + cookbook + "\n" + content
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -84,5 +94,18 @@ func assertFile(t *testing.T, path, want string) {
 	}
 	if string(got) != want {
 		t.Fatalf("file %s = %q, want %q", path, got, want)
+	}
+}
+
+// wantStatus fails the test unless err is a server error response with the
+// given HTTP status code.
+func wantStatus(t *testing.T, err error, code int) {
+	t.Helper()
+	var er *cinc.ErrorResponse
+	if !errors.As(err, &er) {
+		t.Fatalf("err = %v, want an HTTP %d error response", err, code)
+	}
+	if er.StatusCode != code {
+		t.Fatalf("status = %d (%v), want %d", er.StatusCode, err, code)
 	}
 }

@@ -46,6 +46,12 @@ var cases = []testCase{
 	{"cookbooks/upload-download", testCookbookUploadDownload},
 	{"cookbook-artifacts/upload", testCookbookArtifactUpload},
 	{"policies/push-revision-two-groups", testPushRevisionToTwoGroups},
+	{"roles/lifecycle", testRoleLifecycle},
+	{"environments/lifecycle", testEnvironmentLifecycle},
+	{"environments/default-read-only", testEnvironmentDefaultReadOnly},
+	{"data-bags/lifecycle", testDataBagLifecycle},
+	{"data-bags/encrypted-round-trip", testDataBagEncryptedRoundTrip},
+	{"data-bags/chef-encrypted-formats", testDataBagChefEncryptedFormats},
 }
 
 // Run runs every shared case against tgt as a parallel subtest, skipping the

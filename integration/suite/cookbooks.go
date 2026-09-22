@@ -20,14 +20,15 @@ func testCookbookUploadDownload(t *testing.T, c *cinc.Client) {
 		return err
 	})
 
-	// The cookbook name comes from metadata.rb, not the directory.
+	// The cookbook name comes from metadata.rb, not the directory. Every file
+	// names the cookbook: see uniqueContent.
 	src := filepath.Join(t.TempDir(), "src")
 	files := map[string]string{
 		"metadata.rb": "name '" + name + "'\nversion '1.0.0'\ndescription 'Installs nginx'\n" +
 			"depends 'apt'\ndepends 'logrotate', '~> 2.0'\n",
-		"recipes/default.rb":       "package 'nginx'\n",
-		"attributes/default.rb":    "default['nginx']['port'] = 80\n",
-		"templates/nginx.conf.erb": "listen <%= node['nginx']['port'] %>;\n",
+		"recipes/default.rb":       uniqueContent(name, "package 'nginx'\n"),
+		"attributes/default.rb":    uniqueContent(name, "default['nginx']['port'] = 80\n"),
+		"templates/nginx.conf.erb": uniqueContent(name, "listen <%= node['nginx']['port'] %>;\n"),
 	}
 	for rel, content := range files {
 		writeFile(t, filepath.Join(src, filepath.FromSlash(rel)), content)
@@ -101,7 +102,7 @@ func testCookbookArtifactUpload(t *testing.T, c *cinc.Client) {
 
 	src := filepath.Join(t.TempDir(), "src")
 	writeFile(t, filepath.Join(src, "metadata.rb"), "name '"+name+"'\n")
-	writeFile(t, filepath.Join(src, "recipes", "default.rb"), "package 'nginx'\n")
+	writeFile(t, filepath.Join(src, "recipes", "default.rb"), uniqueContent(name, "package 'nginx'\n"))
 
 	cb, err := cinc.LocalCookbookFromDir(src, "0.0.0")
 	if err != nil {
