@@ -10,7 +10,7 @@ linters:
     staticcheck:
       # QF1008 wants srv.Server.Config trimmed to srv.Config. Here the
       # embedded field is the point: cinctest.Server embeds *httptest.Server,
-      # and naming it says which Server is being reached into. CLAUDE.md
+      # and naming it says which Server is being reached into. AGENTS.md
       # documents `srv.Server.Config.Handler` as the idiom for tests that
       # bypass the harness, so the check is off rather than the convention.
       # This repeats golangci-lint's own default exclusions; listing only

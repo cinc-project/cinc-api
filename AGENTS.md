@@ -1,4 +1,4 @@
-# Notes for Claude Code
+# Notes for coding agents
 
 This is a Go client for the Chef Infra / CINC Server API. The package is
 small, flat, and idiomatic — keep it that way.
