@@ -17,6 +17,16 @@ type CookbookArtifactListEntry struct {
 	Versions []CookbookArtifactVersion `json:"versions"`
 }
 
+// has reports whether identifier is among the entry's versions.
+func (e CookbookArtifactListEntry) has(identifier string) bool {
+	for _, v := range e.Versions {
+		if v.Identifier == identifier {
+			return true
+		}
+	}
+	return false
+}
+
 // CookbookArtifactsService accesses the /cookbook_artifacts endpoints. These
 // are the Policyfile-mode, content-addressed cookbook variant.
 type CookbookArtifactsService struct{ client *Client }

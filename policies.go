@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -135,7 +136,7 @@ func (s *PoliciesService) DeleteRevision(ctx context.Context, name, revisionID s
 	return resp, err
 }
 
-// PushRevision deploys a Policyfile lock to a policy group: it uploads every
+// PushRevision deploys a Policyfile lock to a policy group: it uploads each
 // cookbook the lock pins as a cookbook artifact (under the identifier the lock
 // records), then associates the resulting revision with group. This is the
 // server-side half of `chef push`.
@@ -144,25 +145,41 @@ func (s *PoliciesService) DeleteRevision(ctx context.Context, name, revisionID s
 // policy name and cookbook locks, and sent verbatim to the server so no lock
 // fields are lost. cookbooks maps each cookbook-lock name to the on-disk
 // cookbook to upload for it — callers fetch these from the lock's sources
-// first (see ParsePolicyfileLock). The two server steps are not atomic, but
-// artifact uploads are idempotent by identifier, so a failed push is safe to
-// retry.
+// first (see ParsePolicyfileLock).
+//
+// Chef Server rejects a PUT of an existing artifact identifier with 409, so,
+// like chef-cli, PushRevision lists the server's artifacts once and uploads
+// only the identifiers it lacks; a 409 from a concurrent pusher is treated as
+// already uploaded, since the identifier is a content hash. The artifact
+// uploads and the group association are not atomic, but this makes a failed
+// push safe to retry and lets one lock be pushed to several groups.
 func (s *PoliciesService) PushRevision(ctx context.Context, lockJSON []byte, group string, cookbooks map[string]*LocalCookbook) (*PolicyRevision, *Response, error) {
 	lock, err := ParsePolicyfileLock(lockJSON)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, name := range sortedKeys(lock.CookbookLocks) {
-		cl := lock.CookbookLocks[name]
-		if cl.Identifier == "" {
+	names := sortedKeys(lock.CookbookLocks)
+	for _, name := range names {
+		if lock.CookbookLocks[name].Identifier == "" {
 			return nil, nil, fmt.Errorf("cinc: cookbook lock %q has no identifier", name)
 		}
-		cb := cookbooks[name]
-		if cb == nil {
+		if cookbooks[name] == nil {
 			return nil, nil, fmt.Errorf("cinc: no cookbook supplied for lock %q", name)
 		}
-		if err := s.client.CookbookArtifacts.Upload(ctx, cb, cl.Identifier); err != nil {
-			return nil, nil, fmt.Errorf("cinc: push %s (%s): %w", name, cl.Identifier, err)
+	}
+	if len(names) > 0 {
+		remote, _, err := s.client.CookbookArtifacts.List(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cinc: list cookbook artifacts: %w", err)
+		}
+		for _, name := range names {
+			cb, id := cookbooks[name], lock.CookbookLocks[name].Identifier
+			if remote[cb.Name].has(id) {
+				continue
+			}
+			if err := s.client.CookbookArtifacts.Upload(ctx, cb, id); err != nil && !errors.Is(err, ErrConflict) {
+				return nil, nil, fmt.Errorf("cinc: push %s (%s): %w", name, id, err)
+			}
 		}
 	}
 	return s.client.PolicyGroups.PutPolicy(ctx, group, lock.Name, json.RawMessage(lockJSON))

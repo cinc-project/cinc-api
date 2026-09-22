@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -144,6 +145,8 @@ func TestPushRevision_UploadFailureIsWrapped(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts":
+			w.Write([]byte(`{}`))
 		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
 			w.WriteHeader(500) // the upload fails here
 			w.Write([]byte(`{"error":["boom"]}`))
@@ -194,6 +197,8 @@ func TestPushRevision_UploadsArtifactsThenAssociates(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts":
+			w.Write([]byte(`{}`))
 		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
 			uploadURL := "http://" + r.Host + "/upload/" + recipeChecksum
 			w.WriteHeader(201)
@@ -232,5 +237,141 @@ func TestPushRevision_UploadsArtifactsThenAssociates(t *testing.T) {
 	}
 	if rev.RevisionID != "rev9" {
 		t.Errorf("revision = %+v", rev)
+	}
+}
+
+// pushTestCookbook writes a minimal cookbook named name to disk and loads it.
+func pushTestCookbook(t *testing.T, name string) *LocalCookbook {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "metadata.rb"), []byte("name '"+name+"'\nversion '1.0.0'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cb, err := LocalCookbookFromDir(dir, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	return cb
+}
+
+func TestPushRevision_SkipsArtifactsTheServerHas(t *testing.T) {
+	// Like chef-cli's uploader, PushRevision lists the server's artifacts once
+	// and uploads only identifiers it lacks: a real Chef Server answers a PUT
+	// of an existing artifact identifier with 409. "nginx" is present under the
+	// locked identifier and must be skipped; "base" is present only under a
+	// different identifier and must still be uploaded.
+	const nginxID = "1111111111111111111111111111111111111111"
+	const baseID = "2222222222222222222222222222222222222222"
+	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
+		`"nginx":{"identifier":"` + nginxID + `"},` +
+		`"base":{"identifier":"` + baseID + `"}}}`)
+
+	var lists int
+	var uploaded []string
+	var associated bool
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts":
+			lists++
+			// Shape from erchef oc_chef_wm_named_cookbook_artifact:to_json/2.
+			w.Write([]byte(`{
+				"nginx":{"url":"http://x/cookbook_artifacts/nginx","versions":[
+					{"url":"http://x/cookbook_artifacts/nginx/` + nginxID + `","identifier":"` + nginxID + `"}]},
+				"base":{"url":"http://x/cookbook_artifacts/base","versions":[
+					{"url":"http://x/cookbook_artifacts/base/old","identifier":"old"}]}
+			}`))
+		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			w.WriteHeader(201)
+			w.Write([]byte(`{"sandbox_id":"sb1","checksums":{}}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb1":
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && contains(r.URL.Path, "/cookbook_artifacts/"):
+			uploaded = append(uploaded, r.URL.Path)
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/policy_groups/prod/policies/web":
+			associated = true
+			w.Write([]byte(`{"name":"web"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	c := newTestClient(t, srv.Server)
+	cookbooks := map[string]*LocalCookbook{"nginx": pushTestCookbook(t, "nginx"), "base": pushTestCookbook(t, "base")}
+	if _, _, err := c.Policies.PushRevision(context.Background(), lockJSON, "prod", cookbooks); err != nil {
+		t.Fatalf("PushRevision: %v", err)
+	}
+	if lists != 1 {
+		t.Errorf("listed cookbook artifacts %d times, want once", lists)
+	}
+	want := "/organizations/o/cookbook_artifacts/base/" + baseID
+	if len(uploaded) != 1 || uploaded[0] != want {
+		t.Errorf("uploaded %v, want only %s", uploaded, want)
+	}
+	if !associated {
+		t.Error("policy revision was not associated with the group")
+	}
+}
+
+func TestPushRevision_ConflictMeansAlreadyUploaded(t *testing.T) {
+	// A concurrent push can upload the same artifact between our list and our
+	// PUT. The identifier is a content hash, so the server's 409 means the
+	// artifact is present and the push should carry on.
+	const identifier = "3333333333333333333333333333333333333333"
+	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"` + identifier + `"}}}`)
+
+	var associated bool
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts":
+			w.Write([]byte(`{}`))
+		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			w.WriteHeader(201)
+			w.Write([]byte(`{"sandbox_id":"sb1","checksums":{}}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb1":
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/cookbook_artifacts/nginx/"+identifier:
+			w.WriteHeader(409)
+			w.Write([]byte(`{"error":"Cookbook artifact already exists"}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/policy_groups/prod/policies/web":
+			associated = true
+			w.Write([]byte(`{"name":"web"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	c := newTestClient(t, srv.Server)
+	cookbooks := map[string]*LocalCookbook{"nginx": pushTestCookbook(t, "nginx")}
+	if _, _, err := c.Policies.PushRevision(context.Background(), lockJSON, "prod", cookbooks); err != nil {
+		t.Fatalf("PushRevision: %v", err)
+	}
+	if !associated {
+		t.Error("policy revision was not associated after a 409 on the artifact")
+	}
+}
+
+func TestPushRevision_ListFailure(t *testing.T) {
+	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"abc"}}}`)
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts" {
+			w.WriteHeader(403)
+			w.Write([]byte(`{"error":["forbidden"]}`))
+			return
+		}
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	})
+
+	c := newTestClient(t, srv.Server)
+	cookbooks := map[string]*LocalCookbook{"nginx": pushTestCookbook(t, "nginx")}
+	_, _, err := c.Policies.PushRevision(context.Background(), lockJSON, "prod", cookbooks)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
 	}
 }
