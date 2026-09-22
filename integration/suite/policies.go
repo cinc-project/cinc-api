@@ -37,7 +37,7 @@ func testPushRevisionToTwoGroups(t *testing.T, c *cinc.Client) {
 
 	src := filepath.Join(t.TempDir(), "src")
 	writeFile(t, filepath.Join(src, "metadata.rb"), "name '"+cookbook+"'\nversion '1.0.0'\n")
-	writeFile(t, filepath.Join(src, "recipes", "default.rb"), "package 'nginx'\n")
+	writeFile(t, filepath.Join(src, "recipes", "default.rb"), uniqueContent(cookbook, "package 'nginx'\n"))
 	cb, err := cinc.LocalCookbookFromDir(src, "1.0.0")
 	if err != nil {
 		t.Fatalf("LocalCookbookFromDir: %v", err)
