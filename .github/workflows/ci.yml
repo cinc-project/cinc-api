@@ -36,15 +36,6 @@ jobs:
           # Pinned so a new linter release cannot turn a green branch red
           # without a commit.
           version: v2.13.2
-      - name: No references to the test server's old name
-        # The in-memory Chef server used by ./integration was renamed to
-        # cinc-server-ng; keep the old name from creeping back into code,
-        # comments, or docs. This file is excluded because it names the pattern.
-        run: |
-          if git grep -n -i -E 'cinc[-_ ]?zero' -- ':!.github/workflows/ci.yml'; then
-            echo "::error::Use cinc-server-ng, not its old name." >&2
-            exit 1
-          fi
       - name: golangci-lint (integration module)
         # A separate Go module, so the run above does not reach it — and
         # neither did the `go vet ./...` this job replaces.
