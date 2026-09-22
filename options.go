@@ -35,6 +35,9 @@ type options struct {
 	chefVersion   string
 	skipTLSVerify bool
 	maxRetries    int
+	// transferTimeout bounds each attempt at a bookshelf file transfer. It
+	// is separate from httpClient.Timeout, which covers API calls.
+	transferTimeout time.Duration
 }
 
 func defaultOptions() options {
@@ -43,6 +46,9 @@ func defaultOptions() options {
 		userAgent:   "cinc-api-go",
 		chefVersion: "16.0.0",
 		maxRetries:  2,
+		// Generous enough for a large cookbook file on a slow link, while
+		// still ending a transfer that has stalled outright.
+		transferTimeout: 10 * time.Minute,
 	}
 }
 
@@ -74,6 +80,20 @@ func WithMaxRetries(n int) Option {
 	return func(o *options) {
 		if n >= 0 {
 			o.maxRetries = n
+		}
+	}
+}
+
+// WithTransferTimeout bounds each attempt at a cookbook file transfer (the
+// unsigned bookshelf GETs and sandbox PUTs behind Cookbooks.Upload/Download
+// and CookbookArtifacts.Upload), including reading or sending the whole body.
+// It replaces the http.Client's own Timeout for those requests only; API
+// calls keep it. The default is 10 minutes; 0 removes the limit, leaving the
+// request context as the only bound. Negative values are ignored.
+func WithTransferTimeout(d time.Duration) Option {
+	return func(o *options) {
+		if d >= 0 {
+			o.transferTimeout = d
 		}
 	}
 }

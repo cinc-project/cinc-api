@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -42,21 +41,21 @@ func (c *Client) commitSandbox(ctx context.Context, id string) (*Response, error
 // uploadFile PUTs raw file bytes to a signed sandbox upload URL. These URLs
 // are pre-signed by the server, so the request is NOT Chef-signed; it carries
 // only the Content-Type and Content-MD5 headers Chef expects.
+//
+// Transient failures are retried (see doTransfer) even though this is a PUT,
+// which signed API calls never retry. Here repeating it is safe: the URL is
+// pre-signed for one sandbox checksum, the content is addressed by that
+// checksum and pinned by Content-MD5, so a repeated PUT can only store the
+// same bytes again. Each attempt gets a fresh reader over data.
 func (c *Client) uploadFile(ctx context.Context, uploadURL string, data []byte) error {
-	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("cinc: build upload request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-binary")
-	req.Header.Set("Content-MD5", md5Base64(data))
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("cinc: upload file: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newErrorResponse("PUT", uploadURL, resp.StatusCode, body)
-	}
-	return nil
+	sum := md5Base64(data)
+	return c.doTransfer(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("cinc: build upload request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-binary")
+		req.Header.Set("Content-MD5", sum)
+		return req, nil
+	}, func(*http.Response) error { return nil })
 }

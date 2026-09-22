@@ -95,6 +95,12 @@ down.
   a new failure point in `doOnce` that happens on the wire, mark it, or it
   will never be retried; if it is client-side, do not, or it will be
   retried pointlessly.
+- Bookshelf transfers (`uploadFile`, `downloadFile`) are the exception to
+  "non-GET never retried": they go through `doTransfer`, which applies
+  the same `shouldRetry`/`backoff` policy to the pre-signed PUT as well,
+  because it is idempotent (content-addressed by checksum). They use
+  `transferClient` (timeout `WithTransferTimeout`, default 10m), not
+  the API client's 30s timeout.
 
 ## Encoding edge cases worth remembering
 
