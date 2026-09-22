@@ -86,3 +86,16 @@ func assertFile(t *testing.T, path, want string) {
 		t.Fatalf("file %s = %q, want %q", path, got, want)
 	}
 }
+
+// wantStatus fails the test unless err is a server error response with the
+// given HTTP status code.
+func wantStatus(t *testing.T, err error, code int) {
+	t.Helper()
+	var er *cinc.ErrorResponse
+	if !errors.As(err, &er) {
+		t.Fatalf("err = %v, want an HTTP %d error response", err, code)
+	}
+	if er.StatusCode != code {
+		t.Fatalf("status = %d (%v), want %d", er.StatusCode, err, code)
+	}
+}
