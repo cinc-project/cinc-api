@@ -41,5 +41,5 @@ inventing a new one — the package is small, flat, and idiomatic.
 ## Testing the new service
 
 Write tests **first**: red → implement → green. New files should land with
-100% line coverage. See the Testing section of `CLAUDE.md` for the
+100% line coverage. See the Testing section of `AGENTS.md` for the
 `cinctest` harness and the commands to run.
