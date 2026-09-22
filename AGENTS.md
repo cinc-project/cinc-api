@@ -39,10 +39,18 @@ commands and PR conventions).
   (its own `go.mod`, so the cinc-server-ng test dependency never reaches
   consumers of this package — the root import stays zero-dependency).
   The root `go test ./...` does **not** run them. Run them with
-  `cd integration && go test ./...` (~1s); they boot an in-memory
-  cinc-server-ng server and exercise the real wire protocol end-to-end,
-  unlike the `cinctest` fake the unit tests use. Run them when you
-  touch the transport, signing, or cookbook-upload paths.
+  `cd integration && go test ./...` (~2s); they exercise the real wire
+  protocol end-to-end, unlike the `cinctest` fake the unit tests use. Run
+  them when you touch the transport, signing, or cookbook-upload paths.
+  - `integration/suite` holds every test, written once against a
+    `suite.Target`. Add new integration tests here, to the `cases` table.
+    Each case gives every object it creates a `uniqueName` and a
+    `cleanup`, and runs in parallel.
+  - `integration/cincserverng` boots one in-memory cinc-server-ng and
+    runs the suite against it. A test that cinc-server-ng cannot pass is
+    listed in its `Target.Gaps` with the upstream issue URL, never
+    deleted or special-cased; `suite.Run` fails on a gap that names no
+    test or gives no reason.
 
 ## What the test doubles do not cover
 
