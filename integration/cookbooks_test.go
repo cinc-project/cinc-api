@@ -11,7 +11,7 @@ import (
 
 // TestIntegration_CookbookUploadDownload drives the full three-step cookbook
 // upload (sandbox -> file PUTs -> manifest PUT) and the download flow against a
-// real cinc-zero server, then verifies every file round-trips byte-for-byte.
+// real cinc-server-ng server, then verifies every file round-trips byte-for-byte.
 // This also exercises the parallel bookshelf upload/download path end to end.
 func TestIntegration_CookbookUploadDownload(t *testing.T) {
 	c := newClient(t)
