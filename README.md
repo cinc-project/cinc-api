@@ -64,8 +64,10 @@ model, so callers don't re-encode server conventions:
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
   `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
   `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
+- `Clients.Create` asks the server to generate the client's `default` keypair
+  (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return
-  the new private key.
+  the new private key (creating one if the client has none).
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
   `Policyfile.lock.json` into a `PolicyRevision`.
 - `CookbookLock` accessors — `Origin()` (classify a lock's `source_options` as

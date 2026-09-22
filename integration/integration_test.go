@@ -127,6 +127,37 @@ func TestIntegration_Search(t *testing.T) {
 	}
 }
 
+// cinc-zero generates a client key even without create_key, so this confirms
+// the request shape is accepted end to end rather than proving the key is
+// requested — the unit tests assert create_key is on the wire.
+func TestIntegration_ClientLifecycle(t *testing.T) {
+	c := newClient(t)
+	ctx := context.Background()
+
+	created, _, err := c.Clients.Create(ctx, &cinc.APIClient{Name: "web01"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.ChefKey.PrivateKey == "" {
+		t.Fatalf("Create returned no private key: %+v", created)
+	}
+
+	if _, _, err := c.Clients.Update(ctx, &cinc.APIClient{Name: "web01", Validator: true}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got, _, err := c.Clients.Get(ctx, "web01"); err != nil || !got.Validator {
+		t.Fatalf("Get after update: %+v %v", got, err)
+	}
+
+	key, _, err := c.Clients.Reregister(ctx, "web01")
+	if err != nil {
+		t.Fatalf("Reregister: %v", err)
+	}
+	if key.PrivateKey == "" || key.PrivateKey == created.ChefKey.PrivateKey {
+		t.Fatal("Reregister did not return a fresh private key")
+	}
+}
+
 func TestIntegration_NotFound(t *testing.T) {
 	c := newClient(t)
 	_, _, err := c.Nodes.Get(context.Background(), "does-not-exist")
