@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// ServerAPIVersion is the X-Ops-Server-API-Version the client requests.
+// ServerAPIVersion is the X-Ops-Server-API-Version the client requests by
+// default (see Request.APIVersion).
 const ServerAPIVersion = "1"
 
 // Request is the minimal set of fields needed to sign an HTTP request.
@@ -17,6 +18,17 @@ type Request struct {
 	Body      []byte // request body, may be nil
 	UserID    string // Chef client/user name
 	Timestamp string // ISO-8601 UTC, e.g. 2024-01-01T00:00:00Z
+	// APIVersion is the X-Ops-Server-API-Version to request and sign; empty
+	// means ServerAPIVersion.
+	APIVersion string
+}
+
+// apiVersion returns the server API version r requests.
+func (r Request) apiVersion() string {
+	if r.APIVersion == "" {
+		return ServerAPIVersion
+	}
+	return r.APIVersion
 }
 
 // ContentHash returns base64(sha256(body)).
@@ -80,6 +92,6 @@ func canonicalRequest(r Request, contentHash string) string {
 	b.WriteString("\nX-Ops-UserId:")
 	b.WriteString(r.UserID)
 	b.WriteString("\nX-Ops-Server-API-Version:")
-	b.WriteString(ServerAPIVersion)
+	b.WriteString(r.apiVersion())
 	return b.String()
 }

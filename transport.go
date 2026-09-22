@@ -124,6 +124,16 @@ func isRetriable(err error) bool {
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
+// apiVersionKey is the context key withServerAPIVersion stores under.
+type apiVersionKey struct{}
+
+// withServerAPIVersion makes requests sent with ctx ask for (and sign) server
+// API version v instead of signing.ServerAPIVersion. It exists for the few
+// requests whose body only a newer API version accepts — see uploadCookbook.
+func withServerAPIVersion(ctx context.Context, v string) context.Context {
+	return context.WithValue(ctx, apiVersionKey{}, v)
+}
+
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
 	u := c.baseURLStr + path
 	var rdr io.Reader
@@ -140,9 +150,11 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 	if i := strings.IndexByte(path, '?'); i >= 0 {
 		signPath = path[:i]
 	}
+	apiVersion, _ := ctx.Value(apiVersionKey{}).(string)
 	hdrs, err := signing.SignHeaders(signing.Request{
 		Method: method, Path: signPath, Body: body,
 		UserID: c.clientName, Timestamp: c.timestamp(),
+		APIVersion: apiVersion,
 	}, c.key)
 	if err != nil {
 		return nil, nil, err

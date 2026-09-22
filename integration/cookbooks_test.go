@@ -20,7 +20,8 @@ func TestIntegration_CookbookUploadDownload(t *testing.T) {
 	// Build a cookbook named "nginx" on disk (the name comes from the dir base).
 	src := filepath.Join(t.TempDir(), "nginx")
 	files := map[string]string{
-		"metadata.rb":              "name 'nginx'\nversion '1.0.0'\n",
+		"metadata.rb": "name 'nginx'\nversion '1.0.0'\ndescription 'Installs nginx'\n" +
+			"depends 'apt'\ndepends 'logrotate', '~> 2.0'\n",
 		"recipes/default.rb":       "package 'nginx'\n",
 		"attributes/default.rb":    "default['nginx']['port'] = 80\n",
 		"templates/nginx.conf.erb": "listen <%= node['nginx']['port'] %>;\n",
@@ -29,7 +30,8 @@ func TestIntegration_CookbookUploadDownload(t *testing.T) {
 		writeFile(t, filepath.Join(src, filepath.FromSlash(rel)), content)
 	}
 
-	cb, err := cinc.LocalCookbookFromDir(src, "1.0.0")
+	// An empty version takes the one declared in metadata.rb.
+	cb, err := cinc.LocalCookbookFromDir(src, "")
 	if err != nil {
 		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
@@ -54,6 +56,25 @@ func TestIntegration_CookbookUploadDownload(t *testing.T) {
 	}
 	if n := len(got.AllFiles()); n != len(files) {
 		t.Fatalf("manifest lists %d files, want %d", n, len(files))
+	}
+	// The metadata block — dependencies included — survives the round trip.
+	md := got.Metadata
+	if md.Name != "nginx" || md.Version != "1.0.0" || md.Description != "Installs nginx" {
+		t.Errorf("metadata = %+v", md)
+	}
+	if md.Dependencies["apt"] != ">= 0.0.0" || md.Dependencies["logrotate"] != "~> 2.0" {
+		t.Errorf("metadata dependencies = %v", md.Dependencies)
+	}
+	// Files are named the way chef-client expects (segment-prefixed), so it
+	// can find the recipe.
+	names := map[string]bool{}
+	for _, f := range got.AllFiles() {
+		names[f.Name] = true
+	}
+	for _, want := range []string{"recipes/default.rb", "root_files/metadata.rb", "templates/nginx.conf.erb"} {
+		if !names[want] {
+			t.Errorf("manifest file names %v lack %q", names, want)
+		}
 	}
 
 	// Download into a fresh directory and verify every file round-trips.
@@ -91,6 +112,10 @@ func TestIntegration_CookbookArtifactUpload(t *testing.T) {
 	}
 	if got.CookbookName != "nginx" {
 		t.Fatalf("cookbook_name = %q, want nginx", got.CookbookName)
+	}
+	// chef-client builds the cookbook from the artifact's metadata block.
+	if got.Metadata.Name != "nginx" || got.Metadata.Version != "0.0.0" {
+		t.Errorf("artifact metadata = %+v", got.Metadata)
 	}
 }
 

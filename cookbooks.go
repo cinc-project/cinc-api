@@ -3,8 +3,6 @@ package cinc
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -70,6 +67,10 @@ type CookbookMetadata struct {
 	ChefVersions [][]string `json:"chef_versions,omitempty"`
 	OhaiVersions [][]string `json:"ohai_versions,omitempty"`
 	Gems         [][]string `json:"gems,omitempty"`
+
+	// EagerLoadLibraries is true, false, or a glob string/list naming the
+	// libraries chef-client loads eagerly; nil leaves Chef's default (true).
+	EagerLoadLibraries any `json:"eager_load_libraries,omitempty"`
 }
 
 // Cookbook is a single cookbook version's manifest as returned by the server.
@@ -152,7 +153,16 @@ type LocalCookbook struct {
 	Name       string
 	Version    string
 	Identifier string // set for cookbook artifact uploads
-	files      []cookbookFile
+
+	// Metadata is sent as the manifest's metadata block, which Chef Server
+	// requires and chef-client reads (dependencies, chef_version, …).
+	// LocalCookbookFromDir fills it from the cookbook's metadata; callers may
+	// amend it before uploading. Its Name and Version may be left empty — the
+	// manifest fills them from Name and Version — but if set they must match,
+	// since the server rejects metadata that disagrees with the URL.
+	Metadata CookbookMetadata
+
+	files []cookbookFile
 }
 
 // CookbooksService accesses the /cookbooks endpoints.
@@ -320,8 +330,20 @@ func writeVerified(dest string, r io.Reader, checksum string) (err error) {
 	return nil
 }
 
+// manifestAPIVersion is the server API version the manifest PUT asks for.
+// The manifest lists files in the flat all_files form, which Chef Server only
+// accepts from API version 2 on: at 0 or 1 erchef validates the body against
+// the per-segment schema and rejects the all_files key.
+const manifestAPIVersion = "2"
+
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.
 func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook) error {
+	// Build the manifest first, so a cookbook that disagrees with itself
+	// fails before anything is sent.
+	manifest, err := cookbookManifest(cb)
+	if err != nil {
+		return err
+	}
 	hexes := make([]string, 0, len(cb.files))
 	for _, f := range cb.files {
 		hexes = append(hexes, f.checksum)
@@ -358,13 +380,12 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	if _, err := c.commitSandbox(ctx, sb.ID); err != nil {
 		return fmt.Errorf("cinc: commit sandbox: %w", err)
 	}
-	manifest := cookbookManifest(cb)
 	// Use Identifier for artifact uploads; Version for regular cookbooks.
 	slug := cb.Version
 	if cb.Identifier != "" {
 		slug = cb.Identifier
 	}
-	_, _, err = do[map[string]any](ctx, c, "PUT",
+	_, _, err = do[map[string]any](withServerAPIVersion(ctx, manifestAPIVersion), c, "PUT",
 		c.orgPath(base+"/"+esc(cb.Name)+"/"+esc(slug)), manifest)
 	if err != nil {
 		return fmt.Errorf("cinc: put cookbook manifest: %w", err)
@@ -372,15 +393,33 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	return nil
 }
 
-// cookbookManifest builds the version manifest body for an upload.
-// When cb.Identifier is set it emits a cookbook artifact manifest
-// (chef_type "cookbook_artifact_version"); otherwise a plain version manifest.
-func cookbookManifest(cb *LocalCookbook) map[string]any {
+// cookbookManifest builds the version manifest body for an upload, as Chef's
+// CookbookManifest#generate_manifest does. When cb.Identifier is set it emits
+// a cookbook artifact manifest (chef_type "cookbook_artifact_version");
+// otherwise a plain version manifest.
+//
+// Both carry the metadata block with name and version matching the URL:
+// erchef requires metadata.version to equal the URL version on a
+// cookbook_version PUT, and chef-client builds an artifact's
+// Chef::Cookbook::Metadata from it.
+func cookbookManifest(cb *LocalCookbook) (map[string]any, error) {
+	if cb.Version == "" {
+		return nil, fmt.Errorf("cinc: cookbook %q has no version", cb.Name)
+	}
+	md := cb.Metadata
+	if md.Name != "" && md.Name != cb.Name {
+		return nil, fmt.Errorf("cinc: cookbook name %q does not match metadata name %q", cb.Name, md.Name)
+	}
+	if md.Version != "" && md.Version != cb.Version {
+		return nil, fmt.Errorf("cinc: cookbook version %q does not match metadata version %q", cb.Version, md.Version)
+	}
+	md.Name, md.Version = cb.Name, cb.Version
 	all := make([]map[string]any, 0, len(cb.files))
 	for _, f := range cb.files {
+		name, specificity := manifestFileName(f.name)
 		all = append(all, map[string]any{
-			"name": filepath.Base(f.name), "path": f.name,
-			"checksum": f.checksum, "specificity": "default",
+			"name": name, "path": f.name,
+			"checksum": f.checksum, "specificity": specificity,
 		})
 	}
 	if cb.Identifier != "" {
@@ -388,17 +427,47 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 			"cookbook_name": cb.Name,
 			"name":          cb.Name,
 			"identifier":    cb.Identifier,
+			"version":       cb.Version,
+			"metadata":      md,
 			"all_files":     all,
 			"chef_type":     "cookbook_artifact_version",
-		}
+		}, nil
 	}
 	return map[string]any{
 		"cookbook_name": cb.Name,
 		"name":          cb.Name + "-" + cb.Version,
 		"version":       cb.Version,
+		"metadata":      md,
 		"all_files":     all,
 		"chef_type":     "cookbook_version",
+	}, nil
+}
+
+// manifestFileName returns the manifest name and specificity of the file at
+// cookbook-relative path rel, following Chef's
+// CookbookManifest#parse_file_from_root_paths. chef-client files each entry
+// under the segment before the name's first "/", so the name must carry it:
+//
+//   - a file at the cookbook root is "root_files/<file>", specificity "default";
+//   - a deeper file is "<segment>/<basename>" (intermediate directories are
+//     dropped from the name; the path keeps them);
+//   - under templates/ and files/, a file directly in the segment has
+//     specificity "root_default" and a deeper one takes the next directory
+//     (e.g. "default", "ubuntu", "host-foo"); every other file is "default".
+func manifestFileName(rel string) (name, specificity string) {
+	parts := strings.Split(rel, "/")
+	if len(parts) == 1 {
+		return "root_files/" + rel, "default"
 	}
+	segment := parts[0]
+	name = segment + "/" + parts[len(parts)-1]
+	if segment == "templates" || segment == "files" {
+		if len(parts) == 2 {
+			return name, "root_default"
+		}
+		return name, parts[1]
+	}
+	return name, "default"
 }
 
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
@@ -413,19 +482,36 @@ func cookbookManifest(cb *LocalCookbook) map[string]any {
 //   - files excluded by the applicable chefignore (see LoadChefignore, which
 //     also searches parent directories) are skipped.
 //
-// The cookbook name is the `name` from metadata.json, or else from a literal
-// `name '...'` line in metadata.rb, falling back to the base name of dir when
-// neither provides one. Every remaining regular file is read and checksummed.
+// Metadata comes from metadata.json when present (complete, as compiled by
+// knife or Berkshelf), and otherwise from a static parse of metadata.rb that
+// recognizes only literal calls — see parseMetadataRb for exactly which.
+// Supply a metadata.json, or amend Metadata on the result, for anything
+// computed in Ruby.
+//
+// The cookbook name is the metadata's name, falling back to the base name of
+// dir. version is the version to upload as; when empty the metadata's version
+// is used, and failing that Chef's default of "0.0.0". A version that differs
+// from the one the metadata declares is an error, since the server would
+// reject the mismatch. Every remaining regular file is read and checksummed.
 // An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
-	name, err := cookbookNameFromMetadata(dir)
+	md, err := loadCookbookMetadata(dir)
 	if err != nil {
 		return nil, fmt.Errorf("cinc: read cookbook metadata: %w", err)
 	}
-	if name == "" {
-		name = filepath.Base(dir)
+	if md.Name == "" {
+		md.Name = filepath.Base(dir)
 	}
-	cb := &LocalCookbook{Name: name, Version: version}
+	switch {
+	case version == "" && md.Version == "":
+		version = "0.0.0"
+	case version == "":
+		version = md.Version
+	case md.Version != "" && md.Version != version:
+		return nil, fmt.Errorf("cinc: version %q does not match metadata version %q in %s", version, md.Version, dir)
+	}
+	md.Version = version
+	cb := &LocalCookbook{Name: md.Name, Version: version, Metadata: md}
 	ignore, err := LoadChefignore(dir)
 	if err != nil {
 		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
@@ -481,39 +567,3 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 // uploadedCookbookVersionFile is written into cookbooks by chef-zero and is
 // never part of the cookbook itself.
 const uploadedCookbookVersionFile = ".uploaded-cookbook-version.json"
-
-// metadataRbName matches a `name` call with a string literal in metadata.rb,
-// e.g. `name 'nginx'` or `name("nginx")`.
-var metadataRbName = regexp.MustCompile(`(?m)^[ \t]*name[ \t]*\(?[ \t]*(?:'([^']*)'|"([^"]*)")`)
-
-// cookbookNameFromMetadata returns the cookbook name declared in dir's
-// metadata, or "" when there is none. Like Chef, metadata.json takes
-// precedence over metadata.rb. metadata.rb is Ruby and is not evaluated; only
-// a `name` call with a literal string argument is recognized.
-func cookbookNameFromMetadata(dir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
-	switch {
-	case err == nil:
-		var md struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(data, &md); err != nil {
-			return "", fmt.Errorf("metadata.json: %w", err)
-		}
-		return md.Name, nil
-	case !errors.Is(err, fs.ErrNotExist):
-		return "", err
-	}
-	data, err = os.ReadFile(filepath.Join(dir, "metadata.rb"))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", nil
-		}
-		return "", err
-	}
-	m := metadataRbName.FindSubmatch(data)
-	if m == nil {
-		return "", nil
-	}
-	return string(m[1]) + string(m[2]), nil
-}

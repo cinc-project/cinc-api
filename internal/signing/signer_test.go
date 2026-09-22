@@ -77,3 +77,23 @@ func TestChunk60(t *testing.T) {
 			len(got), len(got[0]), len(got[1]), len(got[2]))
 	}
 }
+
+// A request may ask for a server API version other than the default. The
+// version is part of the string-to-sign, so the header must carry the same
+// value the signature covers.
+func TestSignHeaders_APIVersion(t *testing.T) {
+	key := testKey(t)
+	for _, tc := range []struct{ in, want string }{{"", ServerAPIVersion}, {"2", "2"}} {
+		r := Request{Method: "PUT", Path: "/p", UserID: "u", Timestamp: "t", APIVersion: tc.in}
+		h, err := SignHeaders(r, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := h.Get("X-Ops-Server-API-Version"); got != tc.want {
+			t.Errorf("APIVersion %q: header = %q, want %q", tc.in, got, tc.want)
+		}
+		if got := CanonicalRequest(r); !strings.HasSuffix(got, "\nX-Ops-Server-API-Version:"+tc.want) {
+			t.Errorf("APIVersion %q: CanonicalRequest = %q, want it to sign %s", tc.in, got, tc.want)
+		}
+	}
+}
