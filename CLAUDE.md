@@ -59,6 +59,10 @@ of which has hidden a real bug:
   `SetOrgPermission` have no integration coverage. Real erchef has no route
   for the 3-segment form (its deprecated `'*'` fallback needs a segment
   there, and there is none at all for `/_acl/PERM`).
+- **cinc-zero** generates a client key on `POST /clients` even without
+  `create_key`. Real erchef under API v1 creates a keyless client (no
+  `chef_key` in the response, no `default` key) unless `create_key: true`
+  or `public_key` is sent.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
