@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -98,10 +99,11 @@ func TestACLs_AcceptsAnyObjectType(t *testing.T) {
 }
 
 func TestACLs_GetOrg(t *testing.T) {
-	// The organization object's own ACL lives at /organizations/ORG/_acl,
-	// with no object-type segment.
+	// erchef routes the organization object's own ACL at
+	// /organizations/ORG/organizations/_acl (oc_chef_wm dispatch.conf). The
+	// shorter /organizations/ORG/_acl matches no route on a real server.
 	srv := cinctest.New(t)
-	srv.Handle("GET /organizations/o/_acl", cinctest.Route{
+	srv.Handle("GET /organizations/o/organizations/_acl", cinctest.Route{
 		Body: `{"read":{"actors":[],"groups":["admins"]}}`,
 	})
 	c := newTestClient(t, srv.Server)
@@ -117,7 +119,7 @@ func TestACLs_GetOrg(t *testing.T) {
 
 func TestACLs_SetOrgPermission(t *testing.T) {
 	srv := cinctest.New(t)
-	srv.Handle("PUT /organizations/o/_acl/grant", cinctest.Route{
+	srv.Handle("PUT /organizations/o/organizations/_acl/grant", cinctest.Route{
 		Body: `{}`,
 		Assert: func(t *testing.T, _ *http.Request, body []byte) {
 			var req map[string]ACE
@@ -132,6 +134,37 @@ func TestACLs_SetOrgPermission(t *testing.T) {
 		Groups: []string{"admins"},
 	}); err != nil {
 		t.Fatalf("SetOrgPermission: %v", err)
+	}
+}
+
+// The org name comes from Config and must be escaped on both the read and the
+// write path, with the signature covering exactly what goes on the wire.
+func TestACLs_OrgACLEscapesOrgName(t *testing.T) {
+	key := testRSAKey(t)
+	var wire []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		verifySignature(t, r, key)
+		wire = append(wire, r.Method+" "+r.URL.EscapedPath())
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(Config{ServerURL: srv.URL, Org: "a b/c", ClientName: "c", Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, _, err := c.ACLs.GetOrg(ctx); err != nil {
+		t.Fatalf("GetOrg: %v", err)
+	}
+	if err := c.ACLs.SetOrgPermission(ctx, "read", &ACE{}); err != nil {
+		t.Fatalf("SetOrgPermission: %v", err)
+	}
+	want := []string{
+		"GET /organizations/a%20b%2Fc/organizations/_acl",
+		"PUT /organizations/a%20b%2Fc/organizations/_acl/read",
+	}
+	if !reflect.DeepEqual(wire, want) {
+		t.Errorf("wire = %q, want %q", wire, want)
 	}
 }
 

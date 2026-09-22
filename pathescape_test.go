@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -32,9 +33,16 @@ func verifySignature(t *testing.T, r *http.Request, key *rsa.PrivateKey) {
 	if err != nil {
 		t.Fatalf("decode signature: %v", err)
 	}
+	// The body is part of the signed content hash, so a PUT or POST can only
+	// verify if it is hashed too. This consumes r.Body.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 	canonical := signing.CanonicalRequest(signing.Request{
 		Method:    r.Method,
 		Path:      r.URL.EscapedPath(),
+		Body:      body,
 		UserID:    r.Header.Get("X-Ops-Userid"),
 		Timestamp: r.Header.Get("X-Ops-Timestamp"),
 	})

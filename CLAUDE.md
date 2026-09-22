@@ -53,6 +53,12 @@ of which has hidden a real bug:
   per-segment slices), accepts `run_list: null`, and populates both `name`
   and `groupname` on a group GET. A real Chef Server is stricter or shaped
   differently on all three.
+- **cinc-zero** serves the organization's own ACL at
+  `/organizations/O/_acl[/PERM]` and 404s the real erchef route,
+  `/organizations/O/organizations/_acl[/PERM]`, so `ACLs.GetOrg` and
+  `SetOrgPermission` have no integration coverage. Real erchef has no route
+  for the 3-segment form (its deprecated `'*'` fallback needs a segment
+  there, and there is none at all for `/_acl/PERM`).
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
