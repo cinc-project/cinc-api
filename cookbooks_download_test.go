@@ -139,6 +139,7 @@ func TestDownload_TruncatedBodyLeavesDestinationIntact(t *testing.T) {
 		w.Header().Set("Content-Length", "1000")
 		w.Write([]byte("package"))
 	})
+	recordSleeps(c) // every attempt is truncated; don't wait between them
 	dest := t.TempDir()
 	target := filepath.Join(dest, "recipes", "default.rb")
 	writeTestFile(t, target, "previous content\n")

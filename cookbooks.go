@@ -266,23 +266,20 @@ func (c *Client) downloadFile(ctx context.Context, fileURL, dest, checksum strin
 			return nil
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
-	if err != nil {
-		return fmt.Errorf("cinc: build download request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("cinc: fetch file: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newErrorResponse("GET", fileURL, resp.StatusCode, body)
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("cinc: create dirs: %w", err)
-	}
-	return writeVerified(dest, resp.Body, checksum)
+	// Transient failures, including a body cut off mid-stream, are retried
+	// (see doTransfer); writeVerified discards the partial temp file first.
+	return c.doTransfer(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("cinc: build download request: %w", err)
+		}
+		return req, nil
+	}, func(resp *http.Response) error {
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return fmt.Errorf("cinc: create dirs: %w", err)
+		}
+		return writeVerified(dest, wireReader{resp.Body}, checksum)
+	})
 }
 
 // writeVerified streams r into dest atomically: it writes to a temp file in

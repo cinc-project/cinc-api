@@ -19,8 +19,12 @@ type Client struct {
 	clientName string
 	key        *rsa.PrivateKey
 	httpClient *http.Client
-	opts       options
-	clock      func() time.Time
+	// transferClient sends the unsigned bookshelf transfers. It is httpClient
+	// with the Timeout swapped for opts.transferTimeout, sharing its
+	// transport and connection pool.
+	transferClient *http.Client
+	opts           options
+	clock          func() time.Time
 	// sleep waits for d, reporting false if ctx ended first. A field so tests
 	// can drive retry timing without waiting.
 	sleep func(ctx context.Context, d time.Duration) bool
@@ -73,9 +77,11 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 		clone.Transport = cloneTransportSkipVerify(hc.Transport)
 		hc = &clone
 	}
+	tc := *hc
+	tc.Timeout = o.transferTimeout
 	c := &Client{
 		baseURL: base, baseURLStr: base.String(), org: cfg.Org, clientName: cfg.ClientName,
-		key: cfg.Key, httpClient: hc, opts: o, clock: time.Now, sleep: sleepCtx,
+		key: cfg.Key, httpClient: hc, transferClient: &tc, opts: o, clock: time.Now, sleep: sleepCtx,
 	}
 	c.Nodes = &NodesService{client: c}
 	c.Roles = &RolesService{client: c}

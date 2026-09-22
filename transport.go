@@ -23,23 +23,87 @@ const retryBaseDelay = 100 * time.Millisecond
 // doRaw sends a signed request and returns the raw response body.
 // The caller owns closing nothing — the body is fully read and closed here.
 func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
-	var attempt int
-	for {
+	for attempt := 0; ; attempt++ {
 		data, resp, err := c.doOnce(ctx, method, path, body)
-		// Retry only transient failures: a 5xx response, or a failure on the
-		// wire (no HTTP response at all). A non-2xx response surfaces as a
-		// non-nil err *with* resp set, so gate the wire check on resp == nil —
-		// otherwise every 4xx (not-found, forbidden, ...) would be retried.
-		serverErr := resp != nil && resp.StatusCode >= 500
-		retriable := serverErr || isRetriable(err)
-		if !retriable || method != http.MethodGet || attempt >= c.opts.maxRetries {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		if method != http.MethodGet || !shouldRetry(status, err) || !c.backoff(ctx, attempt) {
 			return data, resp, err
 		}
-		if !c.sleep(ctx, retryBaseDelay<<attempt) {
-			return data, resp, err
-		}
-		attempt++
 	}
+}
+
+// shouldRetry reports whether a failed attempt is transient: a 5xx response,
+// or a failure on the wire. status is 0 when no HTTP response arrived. A
+// non-2xx response surfaces as an error too, which is why the status is
+// checked rather than the error alone — otherwise every 4xx (not-found,
+// forbidden, ...) would look like a failure worth repeating.
+func shouldRetry(status int, err error) bool {
+	return status >= 500 || isRetriable(err)
+}
+
+// backoff waits before retry number attempt (0-based), doubling the delay
+// each time. It reports false, without waiting, once maxRetries is spent, or
+// if ctx ends during the wait: either way the caller should give up.
+func (c *Client) backoff(ctx context.Context, attempt int) bool {
+	if attempt >= c.opts.maxRetries {
+		return false
+	}
+	return c.sleep(ctx, retryBaseDelay<<attempt)
+}
+
+// doTransfer sends an unsigned request to a pre-signed bookshelf URL, the
+// file-transfer half of cookbook upload and download. It must never carry
+// Chef signing headers, so it bypasses doOnce and goes through
+// transferClient, whose timeout is WithTransferTimeout rather than the API
+// client's.
+//
+// Transient failures are retried with the same policy as signed GETs:
+// shouldRetry, backoff and WithMaxRetries. newReq is called once per attempt
+// so each one sends its body from the start. handle consumes a 2xx response;
+// an error it returns is retried only if it wraps a transportErr, so a
+// failure reading the body is retried while a local disk error is not.
+func (c *Client) doTransfer(ctx context.Context, newReq func() (*http.Request, error), handle func(*http.Response) error) error {
+	for attempt := 0; ; attempt++ {
+		status, err := c.transferOnce(newReq, handle)
+		if !shouldRetry(status, err) || !c.backoff(ctx, attempt) {
+			return err
+		}
+	}
+}
+
+// transferOnce makes one doTransfer attempt, returning the response status
+// (0 if none arrived) alongside any error.
+func (c *Client) transferOnce(newReq func() (*http.Request, error), handle func(*http.Response) error) (int, error) {
+	req, err := newReq()
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.transferClient.Do(req)
+	if err != nil {
+		return 0, &transportErr{fmt.Errorf("cinc: bookshelf %s: %w", req.Method, err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, newErrorResponse(req.Method, req.URL.String(), resp.StatusCode, body)
+	}
+	return resp.StatusCode, handle(resp)
+}
+
+// wireReader marks read errors from a response body as transport failures,
+// so doTransfer can tell a connection that died mid-body from a failure on
+// the consuming side.
+type wireReader struct{ r io.Reader }
+
+func (w wireReader) Read(p []byte) (int, error) {
+	n, err := w.r.Read(p)
+	if err != nil && err != io.EOF {
+		err = &transportErr{err}
+	}
+	return n, err
 }
 
 // transportErr marks a failure that happened on the wire, as opposed to a

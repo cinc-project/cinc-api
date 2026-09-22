@@ -49,8 +49,15 @@ following endpoint families are implemented:
 | `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / Authenticate                 |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
-`WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`. Idempotent GETs
-are retried on 5xx and network errors.
+`WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`,
+`WithTransferTimeout`. Idempotent GETs are retried on 5xx and network errors.
+Cookbook file transfers to and from the pre-signed bookshelf URLs (the sandbox
+PUTs of an upload, the GETs of a download) are retried the same way; the PUTs
+are safe to repeat because they are addressed by content checksum. Those
+transfers are bounded by `WithTransferTimeout` (default 10 minutes per
+attempt, `0` for no limit beyond the context) instead of the `http.Client`
+timeout, so a large file on a slow link is not cut off by the 30-second API
+timeout.
 
 ### Helpers
 

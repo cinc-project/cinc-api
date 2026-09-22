@@ -180,3 +180,18 @@ func TestWithSkipTLSVerify_PreservesClientConfig(t *testing.T) {
 		t.Error("the caller's client was mutated")
 	}
 }
+
+func TestWithTransferTimeout(t *testing.T) {
+	o := defaultOptions()
+	if o.transferTimeout != 10*time.Minute {
+		t.Errorf("default transferTimeout = %v, want 10m", o.transferTimeout)
+	}
+	WithTransferTimeout(-time.Second)(&o)
+	if o.transferTimeout != 10*time.Minute {
+		t.Errorf("negative transferTimeout should be ignored, got %v", o.transferTimeout)
+	}
+	WithTransferTimeout(0)(&o)
+	if o.transferTimeout != 0 {
+		t.Errorf("WithTransferTimeout(0) should disable the limit, got %v", o.transferTimeout)
+	}
+}

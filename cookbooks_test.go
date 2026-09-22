@@ -515,6 +515,7 @@ func TestUploadFile_NonSuccess(t *testing.T) {
 		w.Write([]byte(`{"error":["bookshelf exploded"]}`))
 	})
 	c := newTestClient(t, srv.Server)
+	recordSleeps(c) // the 500 is retried; don't wait between attempts
 	err := c.uploadFile(context.Background(), srv.Server.URL+"/file", []byte("data"))
 	if err == nil {
 		t.Fatal("expected error for non-2xx upload")
