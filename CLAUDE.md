@@ -47,8 +47,8 @@ commands and PR conventions).
 ## What the test doubles do not cover
 
 Both suites can be green while the wire contract is wrong. Known gaps, each
-of which has hidden a real bug (all re-checked against cinc-server-ng v0.12.0,
-formerly `tas50/cinc-zero`; file new ones at cinc-project/cinc-server-ng):
+of which has hidden a real bug (all re-checked against cinc-server-ng v0.12.0;
+file new ones at cinc-project/cinc-server-ng):
 
 - **cinc-server-ng** returns only `all_files` on a cookbook GET (never the
   per-segment slices), accepts `run_list: null`, and populates both `name`

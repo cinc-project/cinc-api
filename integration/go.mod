@@ -1,7 +1,7 @@
-// This is a separate Go module so the cinc-zero test dependency never reaches
+// This is a separate Go module so the cinc-server-ng test dependency never reaches
 // the root cinc-api module's dependency graph. Consumers of
 // github.com/cinc-project/cinc-api keep a zero-dependency import; only
-// `go test` inside this directory pulls cinc-zero. It is excluded from the
+// `go test` inside this directory pulls cinc-server-ng. It is excluded from the
 // root module's ./... by virtue of having its own go.mod.
 module github.com/cinc-project/cinc-api/integration
 
