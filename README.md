@@ -80,7 +80,8 @@ model, so callers don't re-encode server conventions:
 - `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
   `chef push`: upload each pinned cookbook as an artifact, then associate the
   revision with a policy group. The lock bytes are sent verbatim so no fields
-  are lost.
+  are lost. Artifacts the server already has are skipped, so the same lock can
+  be pushed to several groups and a failed push can be retried.
 - `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — knife's chefignore
   matcher (full path, basename, and ancestor-directory globs), so cookbook
   uploads, archives, and identifier computation agree on which files belong to
