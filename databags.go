@@ -68,7 +68,7 @@ func (s *DataBagItemsService) Create(ctx context.Context, item DataBagItem) (Dat
 	if item.ID() == "" {
 		return nil, nil, errors.New("cinc: data bag item requires an \"id\"")
 	}
-	return do[DataBagItem](ctx, s.client, "POST", s.coll(), item)
+	return s.write(ctx, "POST", s.coll(), item)
 }
 
 // Update replaces an existing item.
@@ -76,7 +76,32 @@ func (s *DataBagItemsService) Update(ctx context.Context, item DataBagItem) (Dat
 	if item.ID() == "" {
 		return nil, nil, fmt.Errorf("cinc: data bag item requires an \"id\"")
 	}
-	return do[DataBagItem](ctx, s.client, "PUT", s.item(item.ID()), item)
+	return s.write(ctx, "PUT", s.item(item.ID()), item)
+}
+
+// serverItemKeys are the keys a Chef Server adds to the item it echoes back
+// from a POST or PUT ("chef_type":"data_bag_item", "data_bag":"<bag>"). They
+// are not part of the stored item, which a GET returns without them.
+var serverItemKeys = [...]string{"chef_type", "data_bag"}
+
+// write sends item and returns the server's echo of it with the
+// server-added keys put back as they were sent: dropped if the caller's item
+// lacked them, restored if it had them (the server stores the caller's
+// value but overwrites it in the response). Returning the added keys would
+// make an encrypted item undecryptable and, if PUT back unwrapped, get them
+// stored for good.
+func (s *DataBagItemsService) write(ctx context.Context, method, path string, item DataBagItem) (DataBagItem, *Response, error) {
+	out, resp, err := do[DataBagItem](ctx, s.client, method, path, item)
+	if out != nil {
+		for _, k := range serverItemKeys {
+			if v, ok := item[k]; ok {
+				out[k] = v
+			} else {
+				delete(out, k)
+			}
+		}
+	}
+	return out, resp, err
 }
 
 // Delete removes an item by id.

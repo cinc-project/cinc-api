@@ -3,7 +3,10 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -105,5 +108,94 @@ func TestDataBags(t *testing.T) {
 	}
 	if _, err := c.DataBags.Delete(ctx, "creds"); err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+}
+
+// A real Chef Server (erchef) answers a data bag item POST or PUT with the
+// item it stored plus two keys it adds itself, "chef_type":"data_bag_item"
+// and "data_bag":"<bag>" (chef_data_bag_item:add_type_and_bag, called from
+// chef_wm_named_data:finalize_create_body and
+// chef_wm_named_data_item:finalize_update_body). A GET returns the stored
+// item without them. These fixtures reproduce that server behaviour.
+func TestDataBagItems_CreateUpdate_StripServerAddedKeys(t *testing.T) {
+	secret := []byte("s3cret")
+	enc, err := DataBagItem{"id": "db", "password": "hunter2"}.Encrypt(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := json.Marshal(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The erchef response body: the request item plus the two added keys.
+	respBody := strings.TrimSuffix(string(stored), "}") +
+		`,"chef_type":"data_bag_item","data_bag":"creds"}`
+
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/data/creds", cinctest.Route{Status: 201, Body: respBody})
+	srv.Handle("PUT /organizations/o/data/creds/db", cinctest.Route{Body: respBody})
+	c := newTestClient(t, srv.Server)
+	items := c.DataBags.Items("creds")
+	ctx := context.Background()
+
+	for name, call := range map[string]func() (DataBagItem, *Response, error){
+		"Create": func() (DataBagItem, *Response, error) { return items.Create(ctx, enc) },
+		"Update": func() (DataBagItem, *Response, error) { return items.Update(ctx, enc) },
+	} {
+		got, _, err := call()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, k := range []string{"chef_type", "data_bag"} {
+			if _, ok := got[k]; ok {
+				t.Errorf("%s: returned item still carries server-added %q: %v", name, k, got)
+			}
+		}
+		if len(got) != len(enc) {
+			t.Errorf("%s: returned item has keys %v, want exactly those sent", name, got)
+		}
+		if !got.IsEncrypted() {
+			t.Errorf("%s: returned item not reported as encrypted", name)
+		}
+		plain, err := got.Decrypt(secret)
+		if err != nil {
+			t.Fatalf("%s: Decrypt: %v", name, err)
+		}
+		if plain["password"] != "hunter2" {
+			t.Errorf("%s: decrypted password = %v", name, plain["password"])
+		}
+	}
+}
+
+// erchef stores whatever unwrapped item it is sent, so an item may carry its
+// own "data_bag" or "chef_type" key; the server stores that value but
+// overwrites it in the POST/PUT response. The client restores the value it
+// sent, because that is what the server actually stored.
+func TestDataBagItems_Create_KeepsCallerSuppliedKeys(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/data/creds", cinctest.Route{Status: 201,
+		Body: `{"id":"web","data_bag":"creds","chef_type":"data_bag_item"}`})
+	c := newTestClient(t, srv.Server)
+
+	got, _, err := c.DataBags.Items("creds").Create(context.Background(),
+		DataBagItem{"id": "web", "data_bag": "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DataBagItem{"id": "web", "data_bag": "mine"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Create returned %v, want %v", got, want)
+	}
+}
+
+func TestDataBagItems_Create_EmptyResponseBody(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/data/creds", cinctest.Route{Status: 201})
+	c := newTestClient(t, srv.Server)
+
+	got, _, err := c.DataBags.Items("creds").Create(context.Background(),
+		DataBagItem{"id": "web", "data_bag": "mine"})
+	if err != nil || got != nil {
+		t.Errorf("Create = %v, %v; want nil item, nil error", got, err)
 	}
 }
