@@ -115,3 +115,28 @@ func checkGrantRevoke(t *testing.T, actor string, get func() (*cinc.ACL, error),
 		t.Fatalf("after revoke: read = %+v still has %s", acl.Read, actor)
 	}
 }
+
+// testCookbookObjectACLs does the grant/revoke check on a cookbook, a cookbook
+// artifact, a policy and a policy group.
+func testCookbookObjectACLs(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	cookbook := uniqueName(t, "cookbook")
+	uploadCookbook(t, c, cookbook, "1.0.0", nil)
+	artifact, _ := uploadArtifact(t, c)
+	group := uniqueName(t, "group")
+	p := pushPolicy(t, c, group)
+
+	grantee := newClient(t, c)
+	for _, obj := range []struct{ segment, name string }{
+		{"cookbooks", cookbook},
+		{"cookbook_artifacts", artifact},
+		{"policies", p.name},
+		{"policy_groups", group},
+	} {
+		t.Run(obj.segment, func(t *testing.T) {
+			checkGrantRevoke(t, grantee,
+				func() (*cinc.ACL, error) { acl, _, err := c.ACLs.Get(ctx, obj.segment, obj.name); return acl, err },
+				func(ace *cinc.ACE) error { return c.ACLs.SetPermission(ctx, obj.segment, obj.name, "read", ace) })
+		})
+	}
+}

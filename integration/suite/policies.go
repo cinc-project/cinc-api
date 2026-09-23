@@ -2,7 +2,7 @@ package suite
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
 	"testing"
 
 	cinc "github.com/cinc-project/cinc-api"
@@ -14,18 +14,101 @@ import (
 // skips artifacts the server already has.
 func testPushRevisionToTwoGroups(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
-	policy := uniqueName(t, "policy")
-	cookbook := uniqueName(t, "cookbook")
-	identifier := randomHex(t, 20)
 	groups := []string{uniqueName(t, "staging"), uniqueName(t, "prod")}
+	p := pushPolicy(t, c, groups...)
+
+	if _, _, err := c.CookbookArtifacts.Get(ctx, p.cookbook, p.identifier); err != nil {
+		t.Fatalf("CookbookArtifacts.Get: %v", err)
+	}
+	for _, group := range groups {
+		if _, _, err := c.PolicyGroups.GetPolicy(ctx, group, p.name); err != nil {
+			t.Errorf("policy %s not associated with %s: %v", p.name, group, err)
+		}
+	}
+}
+
+// testPolicyRevisions reads a pushed policy back through every policy and
+// policy-group endpoint, then removes the group association and the revision.
+func testPolicyRevisions(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	group := uniqueName(t, "group")
+	p := pushPolicy(t, c, group)
+
+	list, _, err := c.Policies.List(ctx)
+	if err != nil {
+		t.Fatalf("Policies.List: %v", err)
+	}
+	if _, ok := list[p.name].Revisions[p.revision]; !ok {
+		t.Fatalf("policy list entry for %s = %+v, want revision %s", p.name, list[p.name], p.revision)
+	}
+	revs, _, err := c.Policies.Get(ctx, p.name)
+	if err != nil {
+		t.Fatalf("Policies.Get: %v", err)
+	}
+	if _, ok := revs.Revisions[p.revision]; !ok {
+		t.Fatalf("revisions of %s = %v, want %s", p.name, revs.Revisions, p.revision)
+	}
+	rev, _, err := c.Policies.GetRevision(ctx, p.name, p.revision)
+	if err != nil {
+		t.Fatalf("GetRevision: %v", err)
+	}
+	if rev.Name != p.name || rev.RevisionID != p.revision || rev.CookbookLocks[p.cookbook].Identifier != p.identifier {
+		t.Fatalf("revision = %+v", rev)
+	}
+
+	groups, _, err := c.PolicyGroups.List(ctx)
+	if err != nil {
+		t.Fatalf("PolicyGroups.List: %v", err)
+	}
+	if groups[group].Policies[p.name].RevisionID != p.revision {
+		t.Fatalf("policy group list entry for %s = %+v, want %s at %s", group, groups[group], p.name, p.revision)
+	}
+	pg, _, err := c.PolicyGroups.Get(ctx, group)
+	if err != nil {
+		t.Fatalf("PolicyGroups.Get: %v", err)
+	}
+	if pg.Policies[p.name].RevisionID != p.revision {
+		t.Fatalf("policy group %s = %+v, want %s at %s", group, pg, p.name, p.revision)
+	}
+
+	if _, err := c.PolicyGroups.DeletePolicy(ctx, group, p.name); err != nil {
+		t.Fatalf("DeletePolicy: %v", err)
+	}
+	if _, _, err := c.PolicyGroups.GetPolicy(ctx, group, p.name); !errors.Is(err, cinc.ErrNotFound) {
+		t.Fatalf("GetPolicy after DeletePolicy: err = %v, want ErrNotFound", err)
+	}
+	if _, err := c.Policies.DeleteRevision(ctx, p.name, p.revision); err != nil {
+		t.Fatalf("DeleteRevision: %v", err)
+	}
+	if _, _, err := c.Policies.GetRevision(ctx, p.name, p.revision); !errors.Is(err, cinc.ErrNotFound) {
+		t.Fatalf("GetRevision after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+// pushedPolicy names what pushPolicy created.
+type pushedPolicy struct {
+	name, revision, cookbook, identifier string
+}
+
+// pushPolicy pushes a new policy, locked to one freshly uploaded cookbook
+// artifact, to each of groups, and registers the deletion of everything it
+// created.
+func pushPolicy(t *testing.T, c *cinc.Client, groups ...string) pushedPolicy {
+	t.Helper()
+	p := pushedPolicy{
+		name:       uniqueName(t, "policy"),
+		revision:   randomHex(t, 32),
+		cookbook:   uniqueName(t, "cookbook"),
+		identifier: randomHex(t, 20),
+	}
 	// Cleanups run last-registered first: groups, then the policy, then the
 	// artifact the policy revision refers to.
-	cleanup(t, "cookbook artifact "+cookbook, func(ctx context.Context) error {
-		_, err := c.CookbookArtifacts.Delete(ctx, cookbook, identifier)
+	cleanup(t, "cookbook artifact "+p.cookbook, func(ctx context.Context) error {
+		_, err := c.CookbookArtifacts.Delete(ctx, p.cookbook, p.identifier)
 		return err
 	})
-	cleanup(t, "policy "+policy, func(ctx context.Context) error {
-		_, err := c.Policies.Delete(ctx, policy)
+	cleanup(t, "policy "+p.name, func(ctx context.Context) error {
+		_, err := c.Policies.Delete(ctx, p.name)
 		return err
 	})
 	for _, group := range groups {
@@ -35,22 +118,14 @@ func testPushRevisionToTwoGroups(t *testing.T, _ Target, c *cinc.Client) {
 		})
 	}
 
-	src := filepath.Join(t.TempDir(), "src")
-	writeFile(t, filepath.Join(src, "metadata.rb"), "name '"+cookbook+"'\nversion '1.0.0'\n")
-	writeFile(t, filepath.Join(src, "recipes", "default.rb"), uniqueContent(cookbook, "package 'nginx'\n"))
-	cb, err := cinc.LocalCookbookFromDir(src, "1.0.0")
-	if err != nil {
-		t.Fatalf("LocalCookbookFromDir: %v", err)
-	}
-
 	lockJSON := []byte(`{
-		"revision_id":"` + randomHex(t, 32) + `",
-		"name":"` + policy + `",
-		"run_list":["recipe[` + cookbook + `::default]"],
+		"revision_id":"` + p.revision + `",
+		"name":"` + p.name + `",
+		"run_list":["recipe[` + p.cookbook + `::default]"],
 		"named_run_lists":{},
-		"cookbook_locks":{"` + cookbook + `":{
+		"cookbook_locks":{"` + p.cookbook + `":{
 			"version":"1.0.0",
-			"identifier":"` + identifier + `",
+			"identifier":"` + p.identifier + `",
 			"dotted_decimal_identifier":"1.2.3",
 			"cache_key":null,
 			"source_options":{"path":"."}
@@ -59,20 +134,11 @@ func testPushRevisionToTwoGroups(t *testing.T, _ Target, c *cinc.Client) {
 		"override_attributes":{},
 		"solution_dependencies":{"Policyfile":[],"dependencies":{}}
 	}`)
-	cookbooks := map[string]*cinc.LocalCookbook{cookbook: cb}
-
+	cookbooks := map[string]*cinc.LocalCookbook{p.cookbook: localCookbook(t, p.cookbook, "1.0.0", nil)}
 	for _, group := range groups {
-		if _, _, err := c.Policies.PushRevision(ctx, lockJSON, group, cookbooks); err != nil {
+		if _, _, err := c.Policies.PushRevision(t.Context(), lockJSON, group, cookbooks); err != nil {
 			t.Fatalf("PushRevision to %s: %v", group, err)
 		}
 	}
-
-	if _, _, err := c.CookbookArtifacts.Get(ctx, cookbook, identifier); err != nil {
-		t.Fatalf("CookbookArtifacts.Get: %v", err)
-	}
-	for _, group := range groups {
-		if _, _, err := c.PolicyGroups.GetPolicy(ctx, group, policy); err != nil {
-			t.Errorf("policy %s not associated with %s: %v", policy, group, err)
-		}
-	}
+	return p
 }
