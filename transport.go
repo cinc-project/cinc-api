@@ -250,10 +250,30 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 		return nil, nil, &transportErr{fmt.Errorf("cinc: read body: %w", err)}
 	}
 	resp := &Response{HTTPResponse: httpResp, StatusCode: httpResp.StatusCode}
+	if httpResp.StatusCode >= 300 && httpResp.StatusCode < 400 {
+		return data, resp, redirectError(method, path, httpResp)
+	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		return data, resp, newErrorResponse(method, path, httpResp.StatusCode, data)
 	}
 	return data, resp, nil
+}
+
+// redirectError reports a 3xx to a signed request, which the client does not
+// follow (see refuseRedirect). It names the Location, resolved against the
+// request URL, so a misconfigured server URL or proxy is easy to spot.
+func redirectError(method, path string, r *http.Response) *ErrorResponse {
+	where := "no Location"
+	if loc, err := r.Location(); err == nil {
+		where = loc.String()
+	} else if raw := r.Header.Get("Location"); raw != "" {
+		where = raw
+	}
+	return &ErrorResponse{
+		Method: method, Path: path, StatusCode: r.StatusCode,
+		Messages: []string{"the server redirected to " + where +
+			", and signed requests do not follow redirects; check the server URL"},
+	}
 }
 
 // do sends a signed request, decoding a 2xx JSON body into T.

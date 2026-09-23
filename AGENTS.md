@@ -110,6 +110,13 @@ down.
   will hide a mismatch. `verifySignature` in `pathescape_test.go` re-checks
   the RSA signature server-side the way erchef does; use it whenever you
   touch path construction.
+- **Signed requests never follow redirects.** `NewClient` copies the
+  `http.Client` (default or `WithHTTPClient`) and sets `CheckRedirect` to
+  `refuseRedirect` on the copy, never on the caller's; `doOnce` turns the
+  3xx into an `*ErrorResponse` naming the `Location` (`redirectError`).
+  Following one would forward the `X-Ops-*` headers to the new host.
+  `transferClient` is copied before that and keeps the caller's policy, so
+  bookshelf/S3 transfers still follow redirects.
 - Retries: GETs are retried on 5xx and on genuine wire failures, up to
   `WithMaxRetries(n)` (default 2), with exponential backoff from 100ms.
   Non-GET requests are retried only on a `503` (`retryable`): the server

@@ -77,11 +77,20 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 		clone.Transport = cloneTransportSkipVerify(hc.Transport)
 		hc = &clone
 	}
+	// Transfers keep the caller's redirect policy (Go's default follows
+	// redirects, which S3 needs across regions): they carry no signature.
 	tc := *hc
 	tc.Timeout = o.transferTimeout
+	// Signed requests never follow a redirect. Go would forward the X-Ops-*
+	// headers to the new host, which could replay the signed request for the
+	// server's clock-skew window; and the signature covers the original path,
+	// so the new location would reject it anyway. doOnce reports the 3xx.
+	// Set on a copy, never on the caller's client.
+	signed := *hc
+	signed.CheckRedirect = refuseRedirect
 	c := &Client{
 		baseURL: base, baseURLStr: base.String(), org: cfg.Org, clientName: cfg.ClientName,
-		key: cfg.Key, httpClient: hc, transferClient: &tc, opts: o, clock: time.Now, sleep: sleepCtx,
+		key: cfg.Key, httpClient: &signed, transferClient: &tc, opts: o, clock: time.Now, sleep: sleepCtx,
 	}
 	c.Nodes = &NodesService{client: c}
 	c.Roles = &RolesService{client: c}
@@ -108,6 +117,10 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.Stats = &StatsService{client: c}
 	return c, nil
 }
+
+// refuseRedirect is the signed client's CheckRedirect: it hands the 3xx back
+// to doOnce unfollowed.
+func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // cloneTransportSkipVerify returns a transport that mirrors base but skips TLS
 // verification. When base is a caller-supplied *http.Transport its tuning is
