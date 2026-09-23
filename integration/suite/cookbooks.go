@@ -3,6 +3,7 @@ package suite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	cinc "github.com/cinc-project/cinc-api"
@@ -68,15 +69,20 @@ func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 	if md.Dependencies["apt"] != ">= 0.0.0" || md.Dependencies["logrotate"] != "~> 2.0" {
 		t.Errorf("metadata dependencies = %v", md.Dependencies)
 	}
-	// Files are named the way chef-client expects (segment-prefixed), so it
-	// can find the recipe.
-	names := map[string]bool{}
-	for _, f := range got.AllFiles() {
-		names[f.Name] = true
-	}
-	for _, want := range []string{"recipes/default.rb", "root_files/metadata.rb", "templates/nginx.conf.erb"} {
-		if !names[want] {
-			t.Errorf("manifest file names %v lack %q", names, want)
+	// Each file is classified into the segment chef-client looks in, so it
+	// can find the recipe. How that shows depends on the server API version:
+	// the per-segment layout (erchef at API v0/v1) lists the file in the
+	// segment's slice under its bare name, while all_files (API v2, and
+	// cinc-server-ng at any version) prefixes the name with the segment.
+	segments := fileSegments(got)
+	for path, segment := range map[string]string{
+		"recipes/default.rb":       "recipes",
+		"metadata.rb":              "root_files",
+		"templates/nginx.conf.erb": "templates",
+		"attributes/default.rb":    "attributes",
+	} {
+		if segments[path] != segment {
+			t.Errorf("%s is in segment %q, want %q (all: %v)", path, segments[path], segment, segments)
 		}
 	}
 
@@ -123,4 +129,27 @@ func testCookbookArtifactUpload(t *testing.T, _ Target, c *cinc.Client) {
 	if got.Metadata.Name != name || got.Metadata.Version != "0.0.0" {
 		t.Errorf("artifact metadata = %+v", got.Metadata)
 	}
+}
+
+// fileSegments maps each file's path to the segment the server put it in,
+// reading either manifest layout.
+func fileSegments(cb *cinc.Cookbook) map[string]string {
+	out := map[string]string{}
+	for segment, files := range map[string][]cinc.CookbookFileRef{
+		"attributes": cb.Attributes, "definitions": cb.Definitions, "files": cb.Files,
+		"libraries": cb.Libraries, "providers": cb.Providers, "recipes": cb.Recipes,
+		"resources": cb.Resources, "root_files": cb.RootFiles, "templates": cb.Templates,
+	} {
+		for _, f := range files {
+			out[f.Path] = segment
+		}
+	}
+	for _, f := range cb.AllFilesManifest {
+		segment, _, nested := strings.Cut(f.Name, "/")
+		if !nested {
+			segment = "root_files"
+		}
+		out[f.Path] = segment
+	}
+	return out
 }

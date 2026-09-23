@@ -13,7 +13,10 @@ consumers of `github.com/cinc-project/cinc-api`.
 
 A case that one server cannot pass is listed in that target's `Gaps` with the
 reason: an upstream cinc-server-ng issue, or the behaviour observed on
-cinc-server-erlang. `suite.Run` rejects a gap that names no test or has no
+cinc-server-erlang. On cinc-server-erlang the only gaps are operations erchef
+reserves to the pivotal superuser (creating organizations,
+`/authenticate_user`, associating a user without an invitation); the tests'
+admin is a server-admin, and pivotal's key never leaves the instance. `suite.Run` rejects a gap that names no test or has no
 reason.
 
 ## Running against cinc-server-erlang
@@ -63,10 +66,18 @@ The instance shuts itself down (and, with `terminate` shutdown behaviour, is
 terminated) four hours after boot, so a forgotten stack stops billing for
 compute. The Elastic IP and VPC remain until `destroy`.
 
+Everything the stack creates is tagged `cinc-api-integration=true`. After
+every destroy the script lists anything still carrying that tag (when the AWS
+CLI is installed): Terraform removes only what its state tracks, and the AWS
+provider can leave an untracked duplicate behind when it silently retries a
+create. Delete such leftovers by hand, e.g.
+`aws ec2 release-address --allocation-id ...` and `aws ec2 delete-vpc --vpc-id ...`.
+
 ### Cost and time
 
 About $0.17/hour for the `t3.xlarge` plus the Elastic IP. A full run takes
-20–30 minutes, most of it the package install and two `reconfigure`s.
+about 10 minutes: roughly 1 for `apply`, 5 for the package install and two
+`reconfigure`s, 3 for the suite, and 1 for `destroy`.
 
 ### Debugging
 
