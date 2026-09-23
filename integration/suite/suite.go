@@ -85,6 +85,13 @@ var cases = []testCase{
 	{"cookbooks/rejects-manifest-without-metadata", testRejectsManifestWithoutMetadata},
 	{"cookbooks/rejects-all-files-under-api-v1", testRejectsAllFilesUnderAPIv1},
 	{"clients/rejects-key-field-on-update", testRejectsKeyFieldOnClientUpdate},
+	{"users/lifecycle", testUserLifecycle},
+	{"users/authenticate", testUserAuthenticate},
+	{"associations/invite-accept", testInviteAccept},
+	{"associations/invite-reject", testInviteReject},
+	{"associations/invite-rescind", testInviteRescind},
+	{"associations/add-member", testAddMember},
+	{"orgs/lifecycle", testOrgLifecycle},
 }
 
 // Run runs every shared case against tgt as a parallel subtest, skipping the
