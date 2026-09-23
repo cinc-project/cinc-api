@@ -58,13 +58,24 @@ func run(m *testing.M) int {
 	cfg := cinc.Config{ServerURL: srv.URL(), Org: org, ClientName: srv.AdminName(), Key: key}
 
 	target = suite.Target{
-		Name:  "cinc-server-ng",
-		Org:   org,
-		Admin: srv.AdminName(),
+		Name:       "cinc-server-ng",
+		Org:        org,
+		Admin:      srv.AdminName(),
+		ServerURL:  srv.URL(),
+		Key:        key,
+		HTTPClient: hc,
+		// Placeholders: cinc-server-ng wants a signed /_stats request, not
+		// Basic auth, so stats/get is a gap below.
+		StatsUser:     "statsuser",
+		StatsPassword: "unused",
 		Gaps: map[string]string{
 			"acls/org":       "serves the org ACL at /organizations/O/_acl, not erchef's route: https://github.com/cinc-project/cinc-server-ng/issues/161",
 			"principals/get": "returns the API v0 single-object shape under v1: https://github.com/cinc-project/cinc-server-ng/issues/162",
 			"keys/rename":    "key PUT ignores a new name and drops omitted fields: https://github.com/cinc-project/cinc-server-ng/issues/163",
+			"stats/get":      "requires a signed request instead of HTTP Basic auth: https://github.com/cinc-project/cinc-server-ng/issues/164",
+			"cookbooks/rejects-manifest-without-metadata": "accepts a manifest without metadata: https://github.com/cinc-project/cinc-server-ng/issues/160",
+			"cookbooks/rejects-all-files-under-api-v1":    "accepts all_files under API v1: https://github.com/cinc-project/cinc-server-ng/issues/160",
+			"clients/rejects-key-field-on-update":         "accepts and stores create_key on a client PUT: https://github.com/cinc-project/cinc-server-ng/issues/165",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()

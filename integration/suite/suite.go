@@ -6,9 +6,11 @@
 package suite
 
 import (
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -26,6 +28,14 @@ type Target struct {
 	Org string
 	// Admin is the user name Client authenticates as; it is a member of Org.
 	Admin string
+	// ServerURL, Key and HTTPClient are what Client is built from. The
+	// negative cases use them to sign requests the client itself would never
+	// send (see rawRequest).
+	ServerURL  string
+	Key        *rsa.PrivateKey
+	HTTPClient *http.Client
+	// StatsUser and StatsPassword are the HTTP Basic credentials for /_stats.
+	StatsUser, StatsPassword string
 	// Gaps maps a case name (e.g. "nodes/lifecycle") to the reason it is
 	// skipped on this target: an upstream issue URL, or the behaviour
 	// observed. Every key must name an existing case and carry a reason.
@@ -63,6 +73,18 @@ var cases = []testCase{
 	{"acls/org", testOrgACL},
 	{"acls/user", testUserACL},
 	{"principals/get", testPrincipals},
+	{"cookbooks/versions", testCookbookVersions},
+	{"cookbook-artifacts/list-delete", testCookbookArtifactListDelete},
+	{"policies/revisions", testPolicyRevisions},
+	{"acls/cookbook-objects", testCookbookObjectACLs},
+	{"search/partial", testSearchPartial},
+	{"search/all-pages", testSearchAllPages},
+	{"required-recipe/get", testRequiredRecipe},
+	{"license/get", testLicense},
+	{"stats/get", testStats},
+	{"cookbooks/rejects-manifest-without-metadata", testRejectsManifestWithoutMetadata},
+	{"cookbooks/rejects-all-files-under-api-v1", testRejectsAllFilesUnderAPIv1},
+	{"clients/rejects-key-field-on-update", testRejectsKeyFieldOnClientUpdate},
 }
 
 // Run runs every shared case against tgt as a parallel subtest, skipping the
