@@ -163,7 +163,9 @@ func TestWithSkipTLSVerify_PreservesClientConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.httpClient.CheckRedirect == nil {
+	// Signed requests always refuse redirects; the caller's policy survives
+	// on the transfer client.
+	if c.transferClient.CheckRedirect == nil {
 		t.Error("CheckRedirect was dropped")
 	}
 	if c.httpClient.Jar != jar {

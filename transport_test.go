@@ -6,9 +6,13 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -199,22 +203,137 @@ func TestRetry_ContextCancelledNoRetry(t *testing.T) {
 	}
 }
 
-// TestRetry_PostNot retried asserts that a non-GET (POST) 503 is never retried.
-func TestRetry_PostNotRetried(t *testing.T) {
+// A non-GET that fails with a 5xx other than 503 is not retried: the server
+// may have applied it, so repeating a create or delete is not safe.
+func TestRetry_NonGetOther5xxNotRetried(t *testing.T) {
+	for _, code := range []int{500, 502, 504} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(code)
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			recordSleeps(c)
+			type obj struct{}
+			_, _, err := do[obj](context.Background(), c, "POST", "/nodes", map[string]any{"name": "x"})
+			if err == nil {
+				t.Fatalf("expected error for %d", code)
+			}
+			if n := hits.Load(); n != 1 {
+				t.Fatalf("POST hit %d times, want exactly 1 (a %d may have been applied)", n, code)
+			}
+		})
+	}
+}
+
+// A 503 means the server refused the request without processing it (erchef
+// answers one when its key-generation pool is empty), so every method is
+// retried (#89). Each retry resends the same body, signed afresh with a new
+// timestamp.
+func TestRetry_503RetriedForEveryMethod(t *testing.T) {
+	for _, method := range []string{"POST", "PUT", "DELETE"} {
+		t.Run(method, func(t *testing.T) {
+			key := testRSAKey(t)
+			var (
+				hits       atomic.Int32
+				bodies     []string
+				timestamps []string
+			)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				verifySignature(t, r, key)
+				b, _ := io.ReadAll(r.Body)
+				bodies = append(bodies, string(b))
+				timestamps = append(timestamps, r.Header.Get("X-Ops-Timestamp"))
+				if hits.Add(1) < 3 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Write([]byte(`{"name":"ok"}`))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			recordSleeps(c)
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			c.clock = func() time.Time { now = now.Add(time.Second); return now }
+
+			got, _, err := do[struct{ Name string }](context.Background(), c, method, "/users", map[string]any{"name": "x"})
+			if err != nil {
+				t.Fatalf("want success after 503 retries, got %v", err)
+			}
+			if got.Name != "ok" || hits.Load() != 3 {
+				t.Fatalf("got %+v after %d attempts, want ok after 3", got, hits.Load())
+			}
+			for i, b := range bodies {
+				if b != `{"name":"x"}` {
+					t.Errorf("attempt %d body = %q, want the original body", i+1, b)
+				}
+			}
+			if timestamps[0] == timestamps[1] || timestamps[1] == timestamps[2] {
+				t.Errorf("timestamps = %v, want each attempt signed afresh", timestamps)
+			}
+		})
+	}
+}
+
+// A 503 on a non-GET still stops after WithMaxRetries.
+func TestRetry_503NonGetExhausted(t *testing.T) {
 	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv)
-	type obj struct{}
-	_, _, err := do[obj](context.Background(), c, "POST", "/nodes", map[string]any{"name": "x"})
-	if err == nil {
-		t.Fatal("expected error for 503")
+	recordSleeps(c)
+	if _, _, err := do[map[string]any](context.Background(), c, "POST", "/users", map[string]any{"name": "x"}); err == nil {
+		t.Fatal("want the 503 error")
 	}
-	if n := hits.Load(); n != 1 {
-		t.Fatalf("POST hit %d times, want exactly 1 (must not retry non-GET)", n)
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("POST hit %d times, want 3 (1 + maxRetries)", n)
+	}
+}
+
+// A Retry-After header on a 503 sets the wait, capped at maxRetryAfter; it
+// never shortens the normal backoff, and an unparseable one is ignored.
+func TestRetry_503HonoursRetryAfter(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		value string
+		want  time.Duration // first wait
+	}{
+		{"seconds", "3", 3 * time.Second},
+		{"http_date", now.Add(4 * time.Second).Format(http.TimeFormat), 4 * time.Second},
+		{"capped", "3600", maxRetryAfter},
+		{"shorter_than_backoff", "0", retryBaseDelay},
+		{"past_date", now.Add(-time.Hour).Format(http.TimeFormat), retryBaseDelay},
+		{"garbage", "soon", retryBaseDelay},
+		{"negative", "-5", retryBaseDelay},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if hits.Add(1) == 1 {
+					w.Header().Set("Retry-After", tc.value)
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			c.clock = func() time.Time { return now }
+			sleeps := recordSleeps(c)
+			if _, _, err := do[map[string]any](context.Background(), c, "POST", "/users", map[string]any{}); err != nil {
+				t.Fatal(err)
+			}
+			if len(*sleeps) != 1 || (*sleeps)[0] != tc.want {
+				t.Errorf("waits = %v, want [%v]", *sleeps, tc.want)
+			}
+		})
 	}
 }
 
@@ -387,6 +506,16 @@ func TestIsRetriable(t *testing.T) {
 		{"wire", &transportErr{errors.New("connection refused")}, true},
 		{"wire_wrapped", fmt.Errorf("outer: %w", &transportErr{errors.New("reset by peer")}), true},
 		{"wire_but_canceled", &transportErr{fmt.Errorf("get: %w", context.Canceled)}, false},
+		// A certificate that failed to verify fails again: retrying only
+		// delays the error (#85).
+		{"unknown_authority", &transportErr{fmt.Errorf("get: %w", x509.UnknownAuthorityError{})}, false},
+		{"hostname", &transportErr{fmt.Errorf("get: %w", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "h"})}, false},
+		{"cert_invalid", &transportErr{fmt.Errorf("get: %w", x509.CertificateInvalidError{Reason: x509.Expired})}, false},
+		{"cert_verification", &transportErr{fmt.Errorf("get: %w", &tls.CertificateVerificationError{Err: errors.New("x")})}, false},
+		{"system_roots", &transportErr{fmt.Errorf("get: %w", x509.SystemRootsError{})}, false},
+		// An HTTP server on an https:// URL answers every attempt the same way.
+		{"record_header", &transportErr{fmt.Errorf("get: %w", tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"})}, false},
+		{"http_on_https", &transportErr{errors.New("get: http: server gave HTTP response to HTTPS client")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -512,5 +641,48 @@ func TestRetry_BackoffHonoursContextCancellation(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Error("did not abandon the retry promptly")
+	}
+}
+
+// A GET whose TLS handshake fails verification is not retried: the same
+// certificate fails the same way every time (#85). Each case is a real
+// handshake so the test covers the error chain net/http actually returns.
+func TestRetry_TLSVerificationFailuresNotRetried(t *testing.T) {
+	tlsSrv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	tlsSrv.Config.ErrorLog = log.New(io.Discard, "", 0) // the failed handshakes are the point
+	tlsSrv.StartTLS()
+	defer tlsSrv.Close()
+	plainSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer plainSrv.Close()
+	trusting := tlsSrv.Client() // trusts the test CA, whose cert names 127.0.0.1 and example.com only
+
+	cases := []struct {
+		name   string
+		url    string
+		client *http.Client
+	}{
+		{"unknown_authority", tlsSrv.URL, &http.Client{}},
+		{"hostname_mismatch", strings.Replace(tlsSrv.URL, "127.0.0.1", "localhost", 1), trusting},
+		{"http_server_on_https_url", strings.Replace(plainSrv.URL, "http://", "https://", 1), &http.Client{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := NewClient(Config{ServerURL: tc.url, Org: "o", ClientName: "c", Key: testRSAKey(t)},
+				WithHTTPClient(tc.client))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sleeps := recordSleeps(c)
+			if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+				t.Fatal("want a TLS error")
+			}
+			if len(*sleeps) != 0 {
+				t.Errorf("retried a TLS verification failure %d times", len(*sleeps))
+			}
+		})
 	}
 }

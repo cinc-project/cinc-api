@@ -110,13 +110,27 @@ down.
   will hide a mismatch. `verifySignature` in `pathescape_test.go` re-checks
   the RSA signature server-side the way erchef does; use it whenever you
   touch path construction.
+- **Signed requests never follow redirects.** `NewClient` copies the
+  `http.Client` (default or `WithHTTPClient`) and sets `CheckRedirect` to
+  `refuseRedirect` on the copy, never on the caller's; `doOnce` turns the
+  3xx into an `*ErrorResponse` naming the `Location` (`redirectError`).
+  Following one would forward the `X-Ops-*` headers to the new host.
+  `transferClient` is copied before that and keeps the caller's policy, so
+  bookshelf/S3 transfers still follow redirects.
 - Retries: GETs are retried on 5xx and on genuine wire failures, up to
   `WithMaxRetries(n)` (default 2), with exponential backoff from 100ms.
-  Non-GET requests are never retried. Context cancellation/deadline never
-  retries. Only errors wrapped in `transportErr` are retriable — if you add
+  Non-GET requests are retried only on a `503` (`retryable`): the server
+  refused them unprocessed (erchef does this when its key-generation pool
+  runs dry under parallel user/client creation), while a 500/502/504 or a
+  wire failure may follow a request that was applied. A 503's `Retry-After`
+  lengthens the wait, capped at `maxRetryAfter`. Every retry goes back
+  through `doOnce`, so it resends the same body and is re-signed with a
+  fresh timestamp. Context cancellation/deadline never retries. Only errors wrapped in `transportErr` are retriable — if you add
   a new failure point in `doOnce` that happens on the wire, mark it, or it
   will never be retried; if it is client-side, do not, or it will be
-  retried pointlessly.
+  retried pointlessly. A `transportErr` that is a failed certificate
+  verification, or a plain-HTTP server on an `https://` URL, is permanent
+  (`isPermanentTLSError`) and is not retried either.
 - Bookshelf transfers (`uploadFile`, `downloadFile`) are the exception to
   "non-GET never retried": they go through `doTransfer`, which applies
   the same `shouldRetry`/`backoff` policy to the pre-signed PUT as well,
