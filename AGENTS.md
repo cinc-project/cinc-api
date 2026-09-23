@@ -50,7 +50,14 @@ commands and PR conventions).
     runs the suite against it. A test that cinc-server-ng cannot pass is
     listed in its `Target.Gaps` with the upstream issue URL, never
     deleted or special-cased; `suite.Run` fails on a gap that names no
-    test or gives no reason.
+    test or gives no reason. Remove the gap once the issue is fixed.
+  - `integration/cincservererlang` runs the same suite against the CINC
+    Server Erlang stack that `integration/terraform` brings up in AWS.
+    Run it with `integration/run-cinc-server-erlang.sh` (needs AWS
+    credentials; ~25 min, ~$0.17/h; see `integration/README.md`). Without
+    a stack it skips, so CI only compiles it. **Run it before merging any
+    change to a request or response shape**: it is the only suite that
+    talks to erchef itself.
 
 ## What the test doubles do not cover
 

@@ -23,6 +23,17 @@ updates:
         patterns:
           - "*"
 
+  # Providers for the cinc-server-erlang stack.
+  - package-ecosystem: terraform
+    directory: /integration/terraform
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      terraform-providers:
+        patterns:
+          - "*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

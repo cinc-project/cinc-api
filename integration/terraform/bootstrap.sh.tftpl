@@ -1,0 +1,56 @@
+#!/bin/bash
+# Installs and configures CINC Server for the cinc-api integration tests.
+# Rendered by Terraform; output goes to /var/log/cloud-init-output.log.
+set -euo pipefail
+
+# Stop billing for a forgotten stack: the instance terminates itself (its
+# shutdown behaviour is "terminate") four hours after boot.
+shutdown -h +240 "cinc-api integration test server lifetime reached"
+
+state=/etc/cinc-api-it
+install -d -m 0700 "$state"
+
+# 1. Install the pinned package.
+curl -fsSL -o /tmp/cinc-server.deb '${package_url}'
+echo '${package_sha256}  /tmp/cinc-server.deb' | sha256sum -c -
+dpkg -i /tmp/cinc-server.deb
+rm -f /tmp/cinc-server.deb
+
+# 2. TLS certificate issued by the test CA, and the server config.
+cat > "$state/server.crt" <<'PEM'
+${server_cert_pem}
+PEM
+(
+  umask 077
+  cat > "$state/server.key" <<'PEM'
+${server_key_pem}
+PEM
+)
+install -d /etc/cinc-project
+cat > /etc/cinc-project/cinc-server.rb <<RB
+api_fqdn "${api_fqdn}"
+nginx['ssl_certificate'] = "$state/server.crt"
+nginx['ssl_certificate_key'] = "$state/server.key"
+RB
+
+# 3. First reconfigure brings the stack up and creates the secret store.
+cinc-server-ctl reconfigure
+
+# 4. /_stats Basic-auth password, then reconfigure again so nginx picks it up.
+OPSCODE_ERCHEF_STATS_PASSWORD='${stats_password}' cinc-server-ctl set-secret opscode_erchef stats_password
+cinc-server-ctl reconfigure
+
+# 5. Admin user and org. The admin authenticates with the Terraform-generated
+#    key; the server-generated default key and the password are discarded.
+password="$(openssl rand -hex 24)"
+cinc-server-ctl user-create '${admin}' Cinc Admin '${admin}@example.com' "$password" --filename /dev/null
+cat > "$state/admin.pub" <<'PEM'
+${admin_public_key}
+PEM
+cinc-server-ctl add-user-key '${admin}' --public-key-path "$state/admin.pub" --key-name tf-admin
+cinc-server-ctl delete-user-key '${admin}' default
+cinc-server-ctl org-create '${org}' 'cinc-api integration tests' --association_user '${admin}' --filename /dev/null
+cinc-server-ctl grant-server-admin-permissions '${admin}'
+
+touch "$state/ready"
+echo "cinc-api integration test server ready"
