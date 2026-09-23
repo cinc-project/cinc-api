@@ -50,8 +50,11 @@ following endpoint families are implemented:
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`,
-`WithTransferTimeout`. Idempotent GETs are retried on 5xx and network errors.
-Cookbook file transfers to and from the pre-signed bookshelf URLs (the sandbox
+`WithTransferTimeout`. Idempotent GETs are retried on 5xx and network errors,
+but not on a failed TLS certificate check. Any other request is retried only
+on `503 Service Unavailable`, which means the server did not process it (a
+Chef Server under load answers `POST /users` and `POST /clients` this way);
+a `Retry-After` header on the 503 is honoured, up to 10 seconds. Cookbook file transfers to and from the pre-signed bookshelf URLs (the sandbox
 PUTs of an upload, the GETs of a download) are retried the same way; the PUTs
 are safe to repeat because they are addressed by content checksum. Those
 transfers are bounded by `WithTransferTimeout` (default 10 minutes per

@@ -203,22 +203,137 @@ func TestRetry_ContextCancelledNoRetry(t *testing.T) {
 	}
 }
 
-// TestRetry_PostNot retried asserts that a non-GET (POST) 503 is never retried.
-func TestRetry_PostNotRetried(t *testing.T) {
+// A non-GET that fails with a 5xx other than 503 is not retried: the server
+// may have applied it, so repeating a create or delete is not safe.
+func TestRetry_NonGetOther5xxNotRetried(t *testing.T) {
+	for _, code := range []int{500, 502, 504} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(code)
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			recordSleeps(c)
+			type obj struct{}
+			_, _, err := do[obj](context.Background(), c, "POST", "/nodes", map[string]any{"name": "x"})
+			if err == nil {
+				t.Fatalf("expected error for %d", code)
+			}
+			if n := hits.Load(); n != 1 {
+				t.Fatalf("POST hit %d times, want exactly 1 (a %d may have been applied)", n, code)
+			}
+		})
+	}
+}
+
+// A 503 means the server refused the request without processing it (erchef
+// answers one when its key-generation pool is empty), so every method is
+// retried (#89). Each retry resends the same body, signed afresh with a new
+// timestamp.
+func TestRetry_503RetriedForEveryMethod(t *testing.T) {
+	for _, method := range []string{"POST", "PUT", "DELETE"} {
+		t.Run(method, func(t *testing.T) {
+			key := testRSAKey(t)
+			var (
+				hits       atomic.Int32
+				bodies     []string
+				timestamps []string
+			)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				verifySignature(t, r, key)
+				b, _ := io.ReadAll(r.Body)
+				bodies = append(bodies, string(b))
+				timestamps = append(timestamps, r.Header.Get("X-Ops-Timestamp"))
+				if hits.Add(1) < 3 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Write([]byte(`{"name":"ok"}`))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			recordSleeps(c)
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			c.clock = func() time.Time { now = now.Add(time.Second); return now }
+
+			got, _, err := do[struct{ Name string }](context.Background(), c, method, "/users", map[string]any{"name": "x"})
+			if err != nil {
+				t.Fatalf("want success after 503 retries, got %v", err)
+			}
+			if got.Name != "ok" || hits.Load() != 3 {
+				t.Fatalf("got %+v after %d attempts, want ok after 3", got, hits.Load())
+			}
+			for i, b := range bodies {
+				if b != `{"name":"x"}` {
+					t.Errorf("attempt %d body = %q, want the original body", i+1, b)
+				}
+			}
+			if timestamps[0] == timestamps[1] || timestamps[1] == timestamps[2] {
+				t.Errorf("timestamps = %v, want each attempt signed afresh", timestamps)
+			}
+		})
+	}
+}
+
+// A 503 on a non-GET still stops after WithMaxRetries.
+func TestRetry_503NonGetExhausted(t *testing.T) {
 	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv)
-	type obj struct{}
-	_, _, err := do[obj](context.Background(), c, "POST", "/nodes", map[string]any{"name": "x"})
-	if err == nil {
-		t.Fatal("expected error for 503")
+	recordSleeps(c)
+	if _, _, err := do[map[string]any](context.Background(), c, "POST", "/users", map[string]any{"name": "x"}); err == nil {
+		t.Fatal("want the 503 error")
 	}
-	if n := hits.Load(); n != 1 {
-		t.Fatalf("POST hit %d times, want exactly 1 (must not retry non-GET)", n)
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("POST hit %d times, want 3 (1 + maxRetries)", n)
+	}
+}
+
+// A Retry-After header on a 503 sets the wait, capped at maxRetryAfter; it
+// never shortens the normal backoff, and an unparseable one is ignored.
+func TestRetry_503HonoursRetryAfter(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		value string
+		want  time.Duration // first wait
+	}{
+		{"seconds", "3", 3 * time.Second},
+		{"http_date", now.Add(4 * time.Second).Format(http.TimeFormat), 4 * time.Second},
+		{"capped", "3600", maxRetryAfter},
+		{"shorter_than_backoff", "0", retryBaseDelay},
+		{"past_date", now.Add(-time.Hour).Format(http.TimeFormat), retryBaseDelay},
+		{"garbage", "soon", retryBaseDelay},
+		{"negative", "-5", retryBaseDelay},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if hits.Add(1) == 1 {
+					w.Header().Set("Retry-After", tc.value)
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+			c.clock = func() time.Time { return now }
+			sleeps := recordSleeps(c)
+			if _, _, err := do[map[string]any](context.Background(), c, "POST", "/users", map[string]any{}); err != nil {
+				t.Fatal(err)
+			}
+			if len(*sleeps) != 1 || (*sleeps)[0] != tc.want {
+				t.Errorf("waits = %v, want [%v]", *sleeps, tc.want)
+			}
+		})
 	}
 }
 

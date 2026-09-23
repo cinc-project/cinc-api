@@ -112,8 +112,13 @@ down.
   touch path construction.
 - Retries: GETs are retried on 5xx and on genuine wire failures, up to
   `WithMaxRetries(n)` (default 2), with exponential backoff from 100ms.
-  Non-GET requests are never retried. Context cancellation/deadline never
-  retries. Only errors wrapped in `transportErr` are retriable — if you add
+  Non-GET requests are retried only on a `503` (`retryable`): the server
+  refused them unprocessed (erchef does this when its key-generation pool
+  runs dry under parallel user/client creation), while a 500/502/504 or a
+  wire failure may follow a request that was applied. A 503's `Retry-After`
+  lengthens the wait, capped at `maxRetryAfter`. Every retry goes back
+  through `doOnce`, so it resends the same body and is re-signed with a
+  fresh timestamp. Context cancellation/deadline never retries. Only errors wrapped in `transportErr` are retriable — if you add
   a new failure point in `doOnce` that happens on the wire, mark it, or it
   will never be retried; if it is client-side, do not, or it will be
   retried pointlessly. A `transportErr` that is a failed certificate

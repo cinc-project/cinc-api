@@ -75,7 +75,8 @@ func WithSkipTLSVerify(skip bool) Option {
 	return func(o *options) { o.skipTLSVerify = skip }
 }
 
-// WithMaxRetries sets the retry count for idempotent requests.
+// WithMaxRetries sets how many times a failed request is retried: a GET after
+// a 5xx or a network error, any other method after a 503. The default is 2.
 func WithMaxRetries(n int) Option {
 	return func(o *options) {
 		if n >= 0 {

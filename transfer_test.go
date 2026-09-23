@@ -107,6 +107,29 @@ func TestUploadFile_RetriesTransientFailures(t *testing.T) {
 	}
 }
 
+// A bookshelf 503 (S3's SlowDown) waits as long as its Retry-After asks.
+func TestUploadFile_503HonoursRetryAfter(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	sleeps := recordSleeps(c)
+
+	if err := c.uploadFile(context.Background(), srv.URL+"/x", tempCookbookFile(t, "hello")); err != nil {
+		t.Fatalf("uploadFile: %v", err)
+	}
+	if len(*sleeps) != 1 || (*sleeps)[0] != 2*time.Second {
+		t.Errorf("waits = %v, want [2s]", *sleeps)
+	}
+}
+
 func TestUploadFile_GivesUpAfterMaxRetries(t *testing.T) {
 	shelf := newFlakyShelf(t, []int{500, 500, 500, 500}, respondOK)
 	c := newTestClient(t, shelf.Server)
