@@ -486,7 +486,10 @@ func manifestFileName(rel string) (name, specificity string) {
 //     kept;
 //   - chef-zero's .uploaded-cookbook-version.json is skipped;
 //   - files excluded by the applicable chefignore (see LoadChefignore, which
-//     also searches parent directories) are skipped.
+//     also searches parent directories) are skipped;
+//   - a symlink to a regular file inside the cookbook is kept under its own
+//     path; any other symlink, and any special file, is skipped (see
+//     cookbookSymlinkTarget).
 //
 // Metadata comes from metadata.json when present (complete, as compiled by
 // knife or Berkshelf), and otherwise from a static parse of metadata.rb that
@@ -523,6 +526,12 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
 	}
+	// The cookbook's real location, for telling whether a symlink stays
+	// inside it. dir itself may be reached through a symlink.
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cinc: read cookbook dir: %w", err)
+	}
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -546,11 +555,15 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 		if d.Name() == uploadedCookbookVersionFile || ignore.Ignores(rel) {
 			return nil
 		}
-		// Only regular files belong in a cookbook. WalkDir does not follow
-		// symlinks but os.Open does, so without this an entry symlinked
-		// out of the cookbook would be uploaded with its target's content,
-		// and a dangling one would abort the whole walk.
-		if !d.Type().IsRegular() {
+		// Only regular files belong in a cookbook. A symlink to a regular
+		// file inside the cookbook is kept under its own path, as Chef's
+		// loader keeps it; one pointing out of the cookbook, at a
+		// directory, or at nothing is skipped (see cookbookSymlinkTarget).
+		if d.Type()&fs.ModeSymlink != 0 {
+			if !cookbookSymlinkTarget(root, path) {
+				return nil
+			}
+		} else if !d.Type().IsRegular() {
 			return nil
 		}
 		// Stream the file through MD5 rather than holding it: the content is
@@ -569,6 +582,26 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 		return nil, fmt.Errorf("cinc: no files found in %s", dir)
 	}
 	return cb, nil
+}
+
+// cookbookSymlinkTarget reports whether the symlink at path resolves to a
+// regular file inside root (the cookbook's resolved directory). Chef's loader
+// follows any link to a file (File.file?), but a link out of the cookbook
+// would upload content from elsewhere on disk (a key, say) that nobody meant
+// to publish, so only links that stay inside are followed. A dangling link,
+// or one to a directory, is never followed: Find.find does not descend into
+// linked directories either.
+func cookbookSymlinkTarget(root, path string) bool {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	info, err := os.Stat(target)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // uploadedCookbookVersionFile is written into cookbooks by chef-zero and is
