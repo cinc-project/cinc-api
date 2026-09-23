@@ -69,7 +69,7 @@ var metadataRbCall = regexp.MustCompile(`^[ \t]*([a-z_]+)(?:[ \t]*\(|[ \t]+)`)
 
 // parseMetadataRb statically extracts metadata from a metadata.rb. It is Ruby
 // and is never evaluated, so only calls whose arguments are all literals are
-// recognized, and each must sit on one line:
+// recognized:
 //
 //	name, version, description, long_description, maintainer,
 //	maintainer_email, license, source_url, issues_url   'string'
@@ -79,28 +79,95 @@ var metadataRbCall = regexp.MustCompile(`^[ \t]*([a-z_]+)(?:[ \t]*\(|[ \t]+)`)
 //
 // Arguments may be parenthesized; strings may be single-quoted, or
 // double-quoted without interpolation or escapes other than \" and \\; a
-// trailing # comment is allowed. Any other line — a computed value,
-// interpolation, a multi-line call, a conditional, another method — is
-// skipped, so metadata.json is the way to supply metadata this cannot see.
+// symbol (:apt, :"apt") reads as its name; a # comment may end any line.
+// A call may continue onto following lines after a trailing comma or an
+// open parenthesis, as Ruby reads it (see metadataRbStatements). Any other
+// statement — a computed value, interpolation, a conditional, another
+// method — is skipped, so metadata.json is the way to supply metadata this
+// cannot see.
 //
 // Recognized values are normalized as Chef::Cookbook::Metadata stores them,
 // and values Chef would reject (a malformed version or constraint, a cookbook
 // depending on itself) are errors.
 func parseMetadataRb(data []byte) (CookbookMetadata, error) {
 	var md CookbookMetadata
-	for i, line := range strings.Split(string(data), "\n") {
-		method, args, ok := parseRubyCall(line)
+	for _, st := range metadataRbStatements(string(data)) {
+		method, args, ok := parseRubyCall(st.text)
 		if !ok {
 			continue
 		}
 		if err := md.applyRb(method, args); err != nil {
-			return CookbookMetadata{}, fmt.Errorf("metadata.rb:%d: %s: %w", i+1, method, err)
+			return CookbookMetadata{}, fmt.Errorf("metadata.rb:%d: %s: %w", st.line, method, err)
 		}
 	}
 	if _, ok := md.Dependencies[md.Name]; ok && md.Name != "" {
 		return CookbookMetadata{}, fmt.Errorf("metadata.rb: cookbook %q depends on itself", md.Name)
 	}
 	return md, nil
+}
+
+// metadataRbStatement is one statement of a metadata.rb, with any comments
+// removed and continuation lines joined, and the line it starts on.
+type metadataRbStatement struct {
+	line int
+	text string
+}
+
+// metadataRbStatements splits src into statements. A line continues onto
+// the next when, ignoring its comment, it ends in "," or "(", or when a
+// parenthesis it opened is still open and the next line starts with ")".
+// A line that itself starts a call is never taken as a continuation, so a
+// stray trailing comma or an unclosed parenthesis costs only its own
+// statement, never the next call.
+func metadataRbStatements(src string) []metadataRbStatement {
+	lines := strings.Split(src, "\n")
+	var out []metadataRbStatement
+	for i := 0; i < len(lines); i++ {
+		st := metadataRbStatement{line: i + 1}
+		text, depth := rubyCode(lines[i])
+		for i+1 < len(lines) && !metadataRbCall.MatchString(lines[i+1]) {
+			text = strings.TrimRight(text, " \t\r")
+			next := strings.TrimLeft(lines[i+1], " \t")
+			if !strings.HasSuffix(text, ",") && !strings.HasSuffix(text, "(") &&
+				(depth <= 0 || !strings.HasPrefix(next, ")")) {
+				break
+			}
+			i++
+			code, d := rubyCode(next)
+			text += " " + code
+			depth += d
+		}
+		st.text = text
+		out = append(out, st)
+	}
+	return out
+}
+
+// rubyCode returns line without its trailing # comment, and how many more
+// parentheses it opens than closes, both ignoring anything inside a quoted
+// string. An unterminated string leaves the rest of the line as code.
+func rubyCode(line string) (code string, depth int) {
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case quote != 0 && c == '\\':
+			i++
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '#':
+			return line[:i], depth
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		}
+	}
+	return line, depth
 }
 
 // rubyArg is one literal argument: a string, or the bare word true/false.
@@ -247,6 +314,9 @@ func parseRubyLiteral(s string) (arg rubyArg, rest string, ok bool) {
 			return rubyArg{s: word, bare: true}, after, true
 		}
 	}
+	if strings.HasPrefix(s, ":") {
+		return parseRubySymbol(s[1:])
+	}
 	if s == "" || (s[0] != '\'' && s[0] != '"') {
 		return rubyArg{}, "", false
 	}
@@ -276,6 +346,23 @@ func parseRubyLiteral(s string) (arg rubyArg, rest string, ok bool) {
 		}
 	}
 	return rubyArg{}, "", false // unterminated
+}
+
+// parseRubySymbol reads a symbol's name from s, the text after its ":":
+// a quoted string (:"build-essential") or an identifier (:apt). Chef keys
+// the value by the symbol, which serializes as its name.
+func parseRubySymbol(s string) (arg rubyArg, rest string, ok bool) {
+	if s != "" && (s[0] == '\'' || s[0] == '"') {
+		return parseRubyLiteral(s)
+	}
+	n := 0
+	for n < len(s) && startsIdent(s[n:]) {
+		n++
+	}
+	if n == 0 || s[0] >= '0' && s[0] <= '9' {
+		return rubyArg{}, "", false
+	}
+	return rubyArg{s: s[:n]}, s[n:], true
 }
 
 // startsIdent reports whether s begins with a Ruby identifier character, so
