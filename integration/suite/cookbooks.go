@@ -2,6 +2,7 @@ package suite
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,15 @@ func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 	for rel, content := range files {
 		writeFile(t, filepath.Join(src, filepath.FromSlash(rel)), content)
 	}
+	// A template linked to another inside the cookbook is uploaded as a file
+	// with its target's content, as knife uploads it.
+	if err := os.MkdirAll(filepath.Join(src, "templates", "ubuntu"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "nginx.conf.erb"), filepath.Join(src, "templates", "ubuntu", "nginx.conf.erb")); err != nil {
+		t.Fatal(err)
+	}
+	files["templates/ubuntu/nginx.conf.erb"] = files["templates/nginx.conf.erb"]
 
 	// An empty version takes the one declared in metadata.rb.
 	cb, err := cinc.LocalCookbookFromDir(src, "")

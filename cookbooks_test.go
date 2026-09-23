@@ -964,6 +964,48 @@ func TestLocalCookbookFromDir_SkipsSymlinkOutsideCookbook(t *testing.T) {
 	}
 }
 
+// A symlink to a file inside the cookbook (one template shared between
+// platforms, say) is packed under the link's own path with its target's
+// content, as Chef's CookbookVersionLoader does (File.file? follows links).
+// A link to a directory is not descended into, as Find.find does not.
+func TestLocalCookbookFromDir_FollowsSymlinkInsideCookbook(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nginx")
+	for _, dir := range []string{"templates/default", "templates/ubuntu", "files/default/real"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	site := []byte("server_name <%= @name %>;\n")
+	if err := os.WriteFile(filepath.Join(root, "templates", "default", "site.erb"), site, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "files", "default", "real", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "default", "site.erb"), filepath.Join(root, "templates", "ubuntu", "site.erb")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.Symlink("real", filepath.Join(root, "files", "default", "linked-dir")); err != nil {
+		t.Fatal(err)
+	}
+	cb, err := LocalCookbookFromDir(root, "1.0.0")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+	got := map[string]string{}
+	for _, f := range cb.files {
+		got[f.name] = f.checksum
+	}
+	want := map[string]string{
+		"templates/default/site.erb": md5Hex(site),
+		"templates/ubuntu/site.erb":  md5Hex(site),
+		"files/default/real/a.txt":   md5Hex([]byte("a\n")),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("packed %v, want %v", got, want)
+	}
+}
+
 // A dangling symlink must not abort the whole upload.
 func TestLocalCookbookFromDir_SkipsDanglingSymlink(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nginx")
