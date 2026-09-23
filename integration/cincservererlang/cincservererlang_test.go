@@ -16,8 +16,9 @@ import (
 	"github.com/cinc-project/cinc-api/integration/suite"
 )
 
-// readyTimeout bounds the wait for a freshly booted stack: package install
-// plus two reconfigures take roughly 10–15 minutes.
+// readyTimeout bounds the wait for a freshly booted stack. Package install
+// plus two reconfigures took about 5 minutes on the first run; the margin
+// covers slow package downloads.
 const readyTimeout = 20 * time.Minute
 
 func TestCincServerErlang(t *testing.T) {
@@ -79,5 +80,14 @@ func TestCincServerErlang(t *testing.T) {
 		HTTPClient:    hc,
 		StatsUser:     tf.StatsUser,
 		StatsPassword: tf.StatsPassword,
+		// The admin is a server-admin, not the pivotal superuser, whose key
+		// never leaves the instance. erchef reserves these to pivotal: each
+		// answers the server-admin with 403 "missing create permission"
+		// (observed on CINC Server 15.10.125).
+		Gaps: map[string]string{
+			"orgs/lifecycle":          "POST /organizations needs the pivotal superuser; a server-admin gets 403",
+			"users/authenticate":      "POST /authenticate_user needs the pivotal superuser; a server-admin gets 403",
+			"associations/add-member": "POST /organizations/O/users (association without an invitation) needs the pivotal superuser; a server-admin gets 403",
+		},
 	})
 }

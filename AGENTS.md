@@ -54,7 +54,7 @@ commands and PR conventions).
   - `integration/cincservererlang` runs the same suite against the CINC
     Server Erlang stack that `integration/terraform` brings up in AWS.
     Run it with `integration/run-cinc-server-erlang.sh` (needs AWS
-    credentials; ~25 min, ~$0.17/h; see `integration/README.md`). Without
+    credentials; ~10 min, ~$0.17/h; see `integration/README.md`). Without
     a stack it skips, so CI only compiles it. **Run it before merging any
     change to a request or response shape**: it is the only suite that
     talks to erchef itself.
