@@ -3,6 +3,8 @@ package cinc
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,12 +118,40 @@ func (e *transportErr) Unwrap() error { return e.err }
 
 // isRetriable reports whether err is a wire failure a GET may safely repeat.
 // Context cancellation and deadlines never retry: the caller is done waiting.
+// Neither does a failed TLS handshake that will fail the same way next time.
 func isRetriable(err error) bool {
 	var te *transportErr
 	if !errors.As(err, &te) {
 		return false
 	}
-	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return !isPermanentTLSError(err)
+}
+
+// isPermanentTLSError reports whether err is a TLS failure that repeating the
+// request cannot fix: a certificate that failed verification (unknown
+// authority, wrong hostname, expired or otherwise invalid, or no roots to
+// verify against), or a server that is not speaking TLS on an https:// URL.
+// Chef's own client makes the same call for "certificate verify failed".
+func isPermanentTLSError(err error) bool {
+	// net/http replaces the tls.RecordHeaderError of a plain-HTTP reply with
+	// an unwrapped errors.New, so the message is all there is to match.
+	if strings.Contains(err.Error(), "server gave HTTP response to HTTPS client") {
+		return true
+	}
+	var (
+		verifyErr  *tls.CertificateVerificationError
+		authErr    x509.UnknownAuthorityError
+		hostErr    x509.HostnameError
+		invalidErr x509.CertificateInvalidError
+		rootsErr   x509.SystemRootsError
+		headerErr  tls.RecordHeaderError
+	)
+	return errors.As(err, &verifyErr) || errors.As(err, &authErr) ||
+		errors.As(err, &hostErr) || errors.As(err, &invalidErr) ||
+		errors.As(err, &rootsErr) || errors.As(err, &headerErr)
 }
 
 // apiVersionKey is the context key withServerAPIVersion stores under.

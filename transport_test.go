@@ -6,9 +6,13 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -387,6 +391,16 @@ func TestIsRetriable(t *testing.T) {
 		{"wire", &transportErr{errors.New("connection refused")}, true},
 		{"wire_wrapped", fmt.Errorf("outer: %w", &transportErr{errors.New("reset by peer")}), true},
 		{"wire_but_canceled", &transportErr{fmt.Errorf("get: %w", context.Canceled)}, false},
+		// A certificate that failed to verify fails again: retrying only
+		// delays the error (#85).
+		{"unknown_authority", &transportErr{fmt.Errorf("get: %w", x509.UnknownAuthorityError{})}, false},
+		{"hostname", &transportErr{fmt.Errorf("get: %w", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "h"})}, false},
+		{"cert_invalid", &transportErr{fmt.Errorf("get: %w", x509.CertificateInvalidError{Reason: x509.Expired})}, false},
+		{"cert_verification", &transportErr{fmt.Errorf("get: %w", &tls.CertificateVerificationError{Err: errors.New("x")})}, false},
+		{"system_roots", &transportErr{fmt.Errorf("get: %w", x509.SystemRootsError{})}, false},
+		// An HTTP server on an https:// URL answers every attempt the same way.
+		{"record_header", &transportErr{fmt.Errorf("get: %w", tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"})}, false},
+		{"http_on_https", &transportErr{errors.New("get: http: server gave HTTP response to HTTPS client")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -512,5 +526,48 @@ func TestRetry_BackoffHonoursContextCancellation(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Error("did not abandon the retry promptly")
+	}
+}
+
+// A GET whose TLS handshake fails verification is not retried: the same
+// certificate fails the same way every time (#85). Each case is a real
+// handshake so the test covers the error chain net/http actually returns.
+func TestRetry_TLSVerificationFailuresNotRetried(t *testing.T) {
+	tlsSrv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	tlsSrv.Config.ErrorLog = log.New(io.Discard, "", 0) // the failed handshakes are the point
+	tlsSrv.StartTLS()
+	defer tlsSrv.Close()
+	plainSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer plainSrv.Close()
+	trusting := tlsSrv.Client() // trusts the test CA, whose cert names 127.0.0.1 and example.com only
+
+	cases := []struct {
+		name   string
+		url    string
+		client *http.Client
+	}{
+		{"unknown_authority", tlsSrv.URL, &http.Client{}},
+		{"hostname_mismatch", strings.Replace(tlsSrv.URL, "127.0.0.1", "localhost", 1), trusting},
+		{"http_server_on_https_url", strings.Replace(plainSrv.URL, "http://", "https://", 1), &http.Client{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := NewClient(Config{ServerURL: tc.url, Org: "o", ClientName: "c", Key: testRSAKey(t)},
+				WithHTTPClient(tc.client))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sleeps := recordSleeps(c)
+			if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
+				t.Fatal("want a TLS error")
+			}
+			if len(*sleeps) != 0 {
+				t.Errorf("retried a TLS verification failure %d times", len(*sleeps))
+			}
+		})
 	}
 }

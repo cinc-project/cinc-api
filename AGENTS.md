@@ -116,7 +116,9 @@ down.
   retries. Only errors wrapped in `transportErr` are retriable — if you add
   a new failure point in `doOnce` that happens on the wire, mark it, or it
   will never be retried; if it is client-side, do not, or it will be
-  retried pointlessly.
+  retried pointlessly. A `transportErr` that is a failed certificate
+  verification, or a plain-HTTP server on an `https://` URL, is permanent
+  (`isPermanentTLSError`) and is not retried either.
 - Bookshelf transfers (`uploadFile`, `downloadFile`) are the exception to
   "non-GET never retried": they go through `doTransfer`, which applies
   the same `shouldRetry`/`backoff` policy to the pre-signed PUT as well,
