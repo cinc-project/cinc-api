@@ -66,6 +66,44 @@ ohai_version '16.0'
 			`license 'C:\dir'` + "\n",
 			CookbookMetadata{Description: `it's a \ path`, Maintainer: `say "hi"`, License: `C:\dir`}},
 		{"later calls win", "version '1.0.0'\nversion '1.1.0'\n", CookbookMetadata{Version: "1.1.0"}},
+		// Ruby reads a call on, past a trailing comma or an open parenthesis,
+		// so Chef sees each of these dependencies; skipping them would upload
+		// the cookbook without them.
+		{"calls spread over several lines", `
+depends 'apt',
+        '>= 7.0'
+depends(
+  'yum',  # a comment
+  '~> 5.0'
+)
+depends('logrotate',
+        '1.2')
+supports 'ubuntu', # comment after the comma
+         '>= 20.04'
+chef_version '>= 16',
+             '< 19'
+depends 'plain'
+`, CookbookMetadata{
+			Dependencies: map[string]string{
+				"apt": ">= 7.0", "yum": "~> 5.0", "logrotate": "= 1.2", "plain": ">= 0.0.0",
+			},
+			Platforms:    map[string]string{"ubuntu": ">= 20.04"},
+			ChefVersions: [][]string{{"< 19", ">= 16"}},
+		}},
+		{"symbols are read as strings", `
+depends :apt
+depends :"build-essential", '>= 8.0'
+supports :ubuntu
+`, CookbookMetadata{
+			Dependencies: map[string]string{"apt": ">= 0.0.0", "build-essential": ">= 8.0"},
+			Platforms:    map[string]string{"ubuntu": ">= 0.0.0"},
+		}},
+		{"a continuation never swallows the next call", `
+depends 'apt',
+depends 'yum'
+name('x'
+version '1.0.0'
+`, CookbookMetadata{Dependencies: map[string]string{"yum": ">= 0.0.0"}, Version: "1.0.0"}},
 		{"non-literal calls are not recognized", `
 name File.basename(__dir__)
 # version '9.9.9'
@@ -74,8 +112,6 @@ description "tab\tin a double-quoted string"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
 maintainer 'a' + 'b'
 license 'MIT' if true
-depends 'x',
-  '>= 1.0'
 depends pkg
 supports %w(ubuntu debian)
 chef_version
@@ -88,6 +124,10 @@ name 'a', 'b'
 version '1.0', '2.0'
 privacy trueish
 depends 'apt', true
+depends :1abc
+depends :
+depends ::Apt
+depends :'unterminated
 `, CookbookMetadata{}},
 	}
 	for _, c := range cases {

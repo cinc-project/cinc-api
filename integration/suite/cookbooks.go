@@ -22,11 +22,12 @@ func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 	})
 
 	// The cookbook name comes from metadata.rb, not the directory. Every file
-	// names the cookbook: see uniqueContent.
+	// names the cookbook: see uniqueContent. The second dependency is spread
+	// over two lines, as Ruby allows after a comma.
 	src := filepath.Join(t.TempDir(), "src")
 	files := map[string]string{
 		"metadata.rb": "name '" + name + "'\nversion '1.0.0'\ndescription 'Installs nginx'\n" +
-			"depends 'apt'\ndepends 'logrotate', '~> 2.0'\n",
+			"depends 'apt'\ndepends 'logrotate',\n        '~> 2.0'\n",
 		"recipes/default.rb":       uniqueContent(name, "package 'nginx'\n"),
 		"attributes/default.rb":    uniqueContent(name, "default['nginx']['port'] = 80\n"),
 		"templates/nginx.conf.erb": uniqueContent(name, "listen <%= node['nginx']['port'] %>;\n"),
