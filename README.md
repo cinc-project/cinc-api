@@ -150,9 +150,9 @@ model, so callers don't re-encode server conventions:
   call each; an edit is `GetDecrypted`, a change, then `UpdateEncrypted`.
 - `LoadDataBagSecret(path)` / `ParseDataBagSecret(data)` — read a shared
   secret file exactly as Chef's `EncryptedDataBagItem.load_secret` does:
-  leading and trailing NUL and ASCII whitespace stripped, UTF-8 required, an
-  empty secret refused (`ErrEmptyDataBagSecret`). Chef's remote (URL) secrets
-  are not supported.
+  leading and trailing NUL and ASCII whitespace stripped, UTF-8 required
+  (`ErrInvalidDataBagSecret`), an empty secret refused
+  (`ErrEmptyDataBagSecret`). Chef's remote (URL) secrets are not supported.
 - `DataBagItem.Validate()` — the non-empty string `id` check `Create`,
   `Update` and `Encrypt` apply (`ErrMissingDataBagItemID`), for vetting an
   edited item up front. `DataBagItem.Content()` — the item without `id` and

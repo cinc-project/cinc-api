@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,22 @@ func TestParseDataBagSecret_InvalidUTF8(t *testing.T) {
 	}
 	if errors.Is(err, ErrEmptyDataBagSecret) {
 		t.Errorf("err = %v, should not be ErrEmptyDataBagSecret", err)
+	}
+	if !errors.Is(err, ErrInvalidDataBagSecret) {
+		t.Errorf("err = %v, want ErrInvalidDataBagSecret", err)
+	}
+}
+
+func TestLoadDataBagSecret_InvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(path, []byte("\xff\xfeabc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadDataBagSecret(path)
+	if !errors.Is(err, ErrInvalidDataBagSecret) {
+		t.Fatalf("err = %v, want ErrInvalidDataBagSecret", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("err = %v, want it to name %s", err, path)
 	}
 }
