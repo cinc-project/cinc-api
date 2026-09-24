@@ -361,3 +361,14 @@ func TestACE_RemoveMembers_RemovesEveryCopy(t *testing.T) {
 		t.Errorf("actors = %v, want [bob]", a.Actors)
 	}
 }
+
+func TestUnknownPermErrors(t *testing.T) {
+	_, err := ExpandPerm("destroy")
+	if err == nil || err.Error() != `cinc: unknown permission "destroy": want one of create, read, update, delete, grant, or all` {
+		t.Errorf("ExpandPerm error = %v", err)
+	}
+	_, err = (&ACL{}).ACEFor("all")
+	if err == nil || err.Error() != `cinc: unknown permission "all": want one of create, read, update, delete, or grant (expand "all" with ExpandPerm)` {
+		t.Errorf("ACEFor error = %v", err)
+	}
+}
