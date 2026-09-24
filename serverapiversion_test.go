@@ -126,6 +126,51 @@ func TestClient_ServerAPIVersion(t *testing.T) {
 		}
 	})
 
+	t.Run("erchef body without header", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /server_api_version", cinctest.Route{Body: `{"min_api_version":0,"max_api_version":2}`})
+		c := newTestClient(t, srv.Server)
+		v, _, err := c.ServerAPIVersion(context.Background())
+		if err != nil {
+			t.Fatalf("ServerAPIVersion: %v", err)
+		}
+		if *v != (ServerAPIVersion{Min: 0, Max: 2}) {
+			t.Errorf("ServerAPIVersion = %+v", v)
+		}
+	})
+
+	// A 200 that reports no range (a proxy's page, a server that is not a Chef
+	// Server) is not version 0.
+	for _, body := range []string{`{}`, `{"min_api_version":0}`, `{"max_api_version":2}`, `{"min_api_version":null,"max_api_version":2}`} {
+		t.Run("no range in "+body, func(t *testing.T) {
+			srv := cinctest.New(t)
+			srv.Handle("GET /server_api_version", cinctest.Route{Body: body})
+			c := newTestClient(t, srv.Server)
+			v, resp, err := c.ServerAPIVersion(context.Background())
+			if !errors.Is(err, ErrNoServerAPIVersion) || v != nil || resp == nil {
+				t.Errorf("ServerAPIVersion = %+v, %v, %v; want nil, a response and ErrNoServerAPIVersion", v, resp, err)
+			}
+		})
+	}
+
+	t.Run("range from the header when the body has none", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /server_api_version", cinctest.Route{Body: `{}`})
+		handler := srv.Server.Config.Handler
+		srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Ops-Server-API-Version", `{"min_version":"0","max_version":"2","request_version":"1","response_version":"1"}`)
+			handler.ServeHTTP(w, r)
+		})
+		c := newTestClient(t, srv.Server)
+		v, _, err := c.ServerAPIVersion(context.Background())
+		if err != nil {
+			t.Fatalf("ServerAPIVersion: %v", err)
+		}
+		if *v != (ServerAPIVersion{Min: 0, Max: 2, Request: 1, Response: 1}) {
+			t.Errorf("ServerAPIVersion = %+v", v)
+		}
+	})
+
 	t.Run("error", func(t *testing.T) {
 		srv := cinctest.New(t)
 		srv.Handle("GET /server_api_version", cinctest.Route{Status: 404, Body: `{"error":["no"]}`})

@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 )
 
@@ -69,20 +70,28 @@ func versionNumber(raw json.RawMessage) (int, bool) {
 	return n, err == nil
 }
 
+// ErrNoServerAPIVersion means GET /server_api_version succeeded but reported
+// no API version range, in neither its body nor its X-Ops-Server-API-Version
+// header, as from a proxy or a server that is not a Chef Server.
+var ErrNoServerAPIVersion = errors.New("cinc: the server did not report which API versions it supports")
+
 // serverAPIVersionBody is the GET /server_api_version body. erchef sends only
-// the range; cinc-server-ng adds the negotiated versions.
+// the range; cinc-server-ng adds the negotiated versions. Pointers tell a
+// missing field from a zero.
 type serverAPIVersionBody struct {
-	Min      int `json:"min_api_version"`
-	Max      int `json:"max_api_version"`
-	Request  int `json:"request_version"`
-	Response int `json:"response_version"`
+	Min      *int `json:"min_api_version"`
+	Max      *int `json:"max_api_version"`
+	Request  *int `json:"request_version"`
+	Response *int `json:"response_version"`
 }
 
 // ServerAPIVersion asks the server which API versions it supports, with a GET
 // of the top-level /server_api_version, the cheapest request that reports it
 // (erchef accepts it from any authenticated requestor). The range comes from
-// the body; Request and Response come from the response header, falling back
-// to the body.
+// the body, or from the response header when the body lacks it; Request and
+// Response come from the header, falling back to the body. A response with no
+// range in either is ErrNoServerAPIVersion, never a version of 0, matching
+// the false Response.ServerAPIVersion reports for it.
 //
 // Every response carries the same header, so a caller that has just made
 // another request can read it from that Response instead.
@@ -91,9 +100,27 @@ func (c *Client) ServerAPIVersion(ctx context.Context) (*ServerAPIVersion, *Resp
 	if err != nil {
 		return nil, resp, err
 	}
-	v := ServerAPIVersion(body)
-	if h, ok := resp.ServerAPIVersion(); ok {
+	h, fromHeader := resp.ServerAPIVersion()
+	var v ServerAPIVersion
+	switch {
+	case body.Min != nil && body.Max != nil:
+		v.Min, v.Max = *body.Min, *body.Max
+	case fromHeader:
+		v.Min, v.Max = h.Min, h.Max
+	default:
+		return nil, resp, ErrNoServerAPIVersion
+	}
+	if fromHeader {
 		v.Request, v.Response = h.Request, h.Response
+	} else {
+		v.Request, v.Response = deref(body.Request), deref(body.Response)
 	}
 	return &v, resp, nil
+}
+
+func deref(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
