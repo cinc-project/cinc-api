@@ -131,7 +131,7 @@ func testDataBagEncryptedEdit(t *testing.T, _ Target, c *cinc.Client) {
 	items := c.DataBags.Items(newDataBag(t, c))
 	secret := []byte(randomHex(t, 32))
 	id := uniqueName(t, "item")
-	plain := cinc.DataBagItem{"id": id, "password": "hunter2"}
+	plain := cinc.DataBagItem{"id": id, "motd": "hello"}
 
 	created, _, err := items.CreateEncrypted(ctx, plain, secret)
 	if err != nil {
@@ -148,7 +148,7 @@ func testDataBagEncryptedEdit(t *testing.T, _ Target, c *cinc.Client) {
 		t.Errorf("GetDecrypted = %v, want %v", current, plain)
 	}
 
-	current["password"] = "correct horse"
+	current["motd"] = "hello again"
 	current["port"] = 5432.0
 	if _, _, err := items.UpdateEncrypted(ctx, current, secret); err != nil {
 		t.Fatalf("UpdateEncrypted: %v", err)
