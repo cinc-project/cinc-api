@@ -35,7 +35,7 @@ following endpoint families are implemented:
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
-| `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Delete                                |
+| `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Modify / Delete                       |
 | `c.Orgs`             | `/organizations` (top-level)          | List / Get / Create / Update / Delete                                |
 | `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision |
 | `c.PolicyGroups`     | `/policy_groups`                      | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy           |
@@ -76,8 +76,19 @@ model, so callers don't re-encode server conventions:
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
-  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
-  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
+  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`,
+  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths),
+  `LastCheckin()` (from `automatic.ohai_time`), and `EnvironmentName()`
+  (`_default` when unset).
+- `NormalizeRunListItem(item)` / `NormalizeRunList(items)` — the run-list
+  form erchef stores: a bare `nginx` becomes `recipe[nginx]`, then exact
+  duplicates are dropped in order. `Node` and `Role`
+  `AddRunListItems`/`RemoveRunListItems` compare and write normalized
+  entries, so `nginx` and `recipe[nginx]` are the same item.
+- `Nodes.Modify(name, fn)` — read-modify-write: get the node, apply `fn`,
+  and PUT it only if its encoding changed (a rename is refused). Nodes
+  have no optimistic concurrency, so a concurrent write in between (such as
+  a chef-client run) is overwritten.
 - `Clients.Create` asks the server to generate the client's `default` keypair
   (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return

@@ -1,11 +1,15 @@
 package cinc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Node is a Chef node object.
@@ -78,15 +82,58 @@ func (n *Node) RemoveTags(tags ...string) {
 	n.SetTags(without(n.Tags(), tags))
 }
 
-// AddRunListItems appends run-list entries that are not already present,
-// preserving existing entries and their order.
+// AddRunListItems appends entries to the node's run list, preserving existing
+// entries and their order. The result is normalized the way the Chef Server
+// stores it (see NormalizeRunList), so "nginx" is not added beside a stored
+// "recipe[nginx]", and bare entries already in the list are qualified.
 func (n *Node) AddRunListItems(items ...string) {
-	n.RunList = appendMissing(n.RunList, items)
+	n.RunList = addRunListItems(n.RunList, items)
 }
 
-// RemoveRunListItems removes the given entries from the node's run list.
+// RemoveRunListItems removes entries from the node's run list, comparing
+// normalized forms, so "nginx" removes a stored "recipe[nginx]" and vice
+// versa. The remaining list is normalized as well.
 func (n *Node) RemoveRunListItems(items ...string) {
-	n.RunList = without(n.RunList, items)
+	n.RunList = removeRunListItems(n.RunList, items)
+}
+
+// EnvironmentName returns the node's chef_environment, or "_default" when it
+// is unset, which is the environment the Chef Server assigns such a node.
+func (n *Node) EnvironmentName() string {
+	if n.Environment == "" {
+		return "_default"
+	}
+	return n.Environment
+}
+
+// LastCheckin returns when the node last completed a chef-client run, read
+// from automatic.ohai_time (Unix seconds as a float, set by Ohai on each
+// run). It accepts the value as any JSON-decoded numeric shape (float64,
+// json.Number, int, int64) and reports false when the attribute is absent,
+// not a number, or not positive, as on a node that has never checked in.
+func (n *Node) LastCheckin() (time.Time, bool) {
+	var secs float64
+	switch v := n.Automatic["ohai_time"].(type) {
+	case float64:
+		secs = v
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return time.Time{}, false
+		}
+		secs = f
+	case int:
+		secs = float64(v)
+	case int64:
+		secs = float64(v)
+	default:
+		return time.Time{}, false
+	}
+	if secs <= 0 {
+		return time.Time{}, false
+	}
+	whole, frac := math.Modf(secs)
+	return time.Unix(int64(whole), int64(math.Round(frac*1e9))), true
 }
 
 // Attribute looks up an attribute by name across the node's precedence levels,
@@ -184,6 +231,49 @@ func (s *NodesService) Create(ctx context.Context, n *Node) (*Response, error) {
 func (s *NodesService) Update(ctx context.Context, n *Node) (*Node, *Response, error) {
 	updated, resp, err := s.res().update(ctx, n.Name, n)
 	return ptrOrNil(updated, err), resp, err
+}
+
+// Modify fetches the named node, applies fn to it, and saves the result,
+// returning the node the server holds afterwards and whether a PUT was sent.
+//
+// When fn leaves the node's JSON encoding unchanged, no PUT is sent and the
+// fetched node is returned with false. fn must not rename the node: Modify
+// returns an error without saving if Name changed. An error from fn aborts
+// Modify before the PUT and is returned as-is. A PUT that fails still reports
+// true, since the server may have applied it.
+//
+// The Chef Server has no optimistic concurrency control on nodes: there is
+// no revision or ETag to make the PUT conditional, so a write that lands
+// between the GET and the PUT (a chef-client run finishing, say, which saves
+// the whole node) is overwritten, and vice versa.
+func (s *NodesService) Modify(ctx context.Context, name string, fn func(*Node) error) (*Node, bool, error) {
+	if fn == nil {
+		return nil, false, errors.New("cinc: Nodes.Modify needs a non-nil fn")
+	}
+	n, _, err := s.Get(ctx, name)
+	if err != nil {
+		return nil, false, err
+	}
+	// A node decoded from JSON always re-encodes, so this cannot fail.
+	before, _ := json.Marshal(n)
+	if err := fn(n); err != nil {
+		return nil, false, err
+	}
+	if n.Name != name {
+		return nil, false, fmt.Errorf("cinc: Nodes.Modify cannot rename node %q to %q; create the new node and delete the old one instead", name, n.Name)
+	}
+	after, err := json.Marshal(n)
+	if err != nil {
+		return nil, false, fmt.Errorf("cinc: encoding modified node %q: %w", name, err)
+	}
+	if bytes.Equal(before, after) {
+		return n, false, nil
+	}
+	updated, _, err := s.Update(ctx, n)
+	if err != nil {
+		return nil, true, err
+	}
+	return updated, true, nil
 }
 
 // Delete removes a node by name.

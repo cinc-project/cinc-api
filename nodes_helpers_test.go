@@ -1,8 +1,10 @@
 package cinc
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestNodeTags(t *testing.T) {
@@ -195,5 +197,52 @@ func TestNodeAttributeString(t *testing.T) {
 				t.Errorf("AttributeString(%q) = %q, want %q", tc.key, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNodeLastCheckin(t *testing.T) {
+	want := time.Unix(1700000000, 500000000)
+	cases := []struct {
+		name   string
+		node   *Node
+		want   time.Time
+		wantOK bool
+	}{
+		{"float seconds", &Node{Automatic: Attributes{"ohai_time": 1700000000.5}}, want, true},
+		{"json.Number", &Node{Automatic: Attributes{"ohai_time": json.Number("1700000000.5")}}, want, true},
+		{"int", &Node{Automatic: Attributes{"ohai_time": 1700000000}}, time.Unix(1700000000, 0), true},
+		{"int64", &Node{Automatic: Attributes{"ohai_time": int64(1700000000)}}, time.Unix(1700000000, 0), true},
+		{"no automatic attributes", &Node{}, time.Time{}, false},
+		{"absent", &Node{Automatic: Attributes{"fqdn": "x"}}, time.Time{}, false},
+		{"not a number", &Node{Automatic: Attributes{"ohai_time": "yesterday"}}, time.Time{}, false},
+		{"bad json.Number", &Node{Automatic: Attributes{"ohai_time": json.Number("x")}}, time.Time{}, false},
+		{"zero", &Node{Automatic: Attributes{"ohai_time": 0.0}}, time.Time{}, false},
+		{"only in normal", &Node{Normal: Attributes{"ohai_time": 1700000000.5}}, time.Time{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.node.LastCheckin()
+			if ok != tc.wantOK || !got.Equal(tc.want) {
+				t.Errorf("LastCheckin() = (%v, %v), want (%v, %v)", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+	t.Run("decoded from the wire", func(t *testing.T) {
+		var n Node
+		if err := json.Unmarshal([]byte(`{"name":"a","automatic":{"ohai_time":1700000000.5}}`), &n); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := n.LastCheckin(); !ok || !got.Equal(want) {
+			t.Errorf("LastCheckin() = (%v, %v), want (%v, true)", got, ok, want)
+		}
+	})
+}
+
+func TestNodeEnvironmentName(t *testing.T) {
+	if got := (&Node{}).EnvironmentName(); got != "_default" {
+		t.Errorf("EnvironmentName() on bare node = %q, want _default", got)
+	}
+	if got := (&Node{Environment: "prod"}).EnvironmentName(); got != "prod" {
+		t.Errorf("EnvironmentName() = %q, want prod", got)
 	}
 }
