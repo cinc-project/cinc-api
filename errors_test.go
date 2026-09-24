@@ -14,6 +14,7 @@ func TestErrorResponse_Is(t *testing.T) {
 		http.StatusConflict:     ErrConflict,
 		http.StatusForbidden:    ErrForbidden,
 		http.StatusUnauthorized: ErrUnauthorized,
+		http.StatusBadRequest:   ErrBadRequest,
 	}
 	for code, sentinel := range cases {
 		err := newErrorResponse("GET", "/x", code, []byte(`{"error":["boom"]}`))

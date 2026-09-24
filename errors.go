@@ -13,6 +13,10 @@ var (
 	ErrConflict     = errors.New("cinc: conflict")
 	ErrForbidden    = errors.New("cinc: forbidden")
 	ErrUnauthorized = errors.New("cinc: unauthorized")
+	// ErrBadRequest is a 400: the server refused the request as malformed or
+	// naming something that does not exist, such as an unknown actor or group
+	// in an ACL write.
+	ErrBadRequest = errors.New("cinc: bad request")
 )
 
 // ErrorResponse describes a non-2xx response from the Chef server.
@@ -40,6 +44,8 @@ func (e *ErrorResponse) Error() string {
 // Unwrap maps the status code to a sentinel error for errors.Is.
 func (e *ErrorResponse) Unwrap() error {
 	switch e.StatusCode {
+	case 400:
+		return ErrBadRequest
 	case 401:
 		return ErrUnauthorized
 	case 403:
