@@ -173,7 +173,8 @@ model, so callers don't re-encode server conventions:
   uploads, archives, and identifier computation agree on which files belong to
   a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
   skips dot-directories at the cookbook root and takes the cookbook name from
-  `metadata.json` / `metadata.rb` rather than the directory name.
+  `metadata.json` / `metadata.rb` rather than the directory name (which it
+  falls back to, resolved first so `.` is named after the working directory).
 - `LoadCookbookMetadata(dir)` / `ParseMetadataJSON(data)` /
   `ParseMetadataRb(data)` — read a cookbook's metadata into a
   `CookbookMetadata`, preferring `metadata.json` over `metadata.rb` as Chef's

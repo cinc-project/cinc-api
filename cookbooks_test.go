@@ -1248,6 +1248,29 @@ func TestLocalCookbookFromDir_NameFromMetadata(t *testing.T) {
 	}
 }
 
+// A relative dir such as "." or "../checkout" names the cookbook after the
+// directory it resolves to, not after the path as written.
+func TestLocalCookbookFromDir_NameFromRelativeDir(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "checkout")
+	writeTree(t, root, map[string]string{"recipes/default.rb": "x\n", "sub/.keep": ""})
+	for _, c := range []struct{ cwd, dir string }{
+		{root, "."},
+		{root, "./"},
+		{filepath.Join(root, "sub"), ".."},
+	} {
+		t.Run(c.dir, func(t *testing.T) {
+			t.Chdir(c.cwd)
+			cb, err := LocalCookbookFromDir(c.dir, "")
+			if err != nil {
+				t.Fatalf("LocalCookbookFromDir: %v", err)
+			}
+			if cb.Name != "checkout" || cb.Metadata.Name != "checkout" {
+				t.Fatalf("Name = %q, Metadata.Name = %q, want %q", cb.Name, cb.Metadata.Name, "checkout")
+			}
+		})
+	}
+}
+
 func TestLocalCookbookFromDir_InvalidMetadataJSON(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nginx")
 	writeTree(t, root, map[string]string{"metadata.json": "{not json"})
