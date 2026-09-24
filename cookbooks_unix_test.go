@@ -30,3 +30,25 @@ func TestLocalCookbookFromDir_SkipsSpecialFiles(t *testing.T) {
 		t.Errorf("packed %+v, want just metadata.rb", cb.files)
 	}
 }
+
+// With SkipChefignore the chefignore is never read, so one that cannot be
+// read does not fail the load.
+func TestLocalCookbookFromDir_SkipChefignoreDoesNotReadIt(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a mode-0 file")
+	}
+	// The chefignore that applies sits in the parent directory (as in a
+	// chef-repo), so it is not one of the cookbook's own files.
+	repo := t.TempDir()
+	root := filepath.Join(repo, "x")
+	writeTree(t, repo, map[string]string{"x/metadata.rb": "name 'x'\n", "chefignore": "*.bak\n"})
+	if err := os.Chmod(filepath.Join(repo, "chefignore"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LocalCookbookFromDir(root, ""); err == nil {
+		t.Fatal("expected the default load to fail reading chefignore")
+	}
+	if _, err := LocalCookbookFromDir(root, "", SkipChefignore()); err != nil {
+		t.Fatalf("SkipChefignore: %v", err)
+	}
+}

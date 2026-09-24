@@ -3,12 +3,14 @@ package cinc
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -67,8 +69,9 @@ type CookbookMetadata struct {
 	OhaiVersions [][]string `json:"ohai_versions,omitempty"`
 	Gems         [][]string `json:"gems,omitempty"`
 
-	// EagerLoadLibraries is true, false, or a glob string/list naming the
+	// EagerLoadLibraries is true, false, or a glob string or list naming the
 	// libraries chef-client loads eagerly; nil leaves Chef's default (true).
+	// ParseMetadataRb stores a list as []string, JSON decoding as []any.
 	EagerLoadLibraries any `json:"eager_load_libraries,omitempty"`
 }
 
@@ -494,6 +497,27 @@ func manifestFileName(rel string) (name, specificity string) {
 	return name, "default"
 }
 
+// LocalCookbookOption configures LocalCookbookFromDir.
+type LocalCookbookOption func(*localCookbookOptions)
+
+type localCookbookOptions struct {
+	skipChefignore bool
+}
+
+// SkipChefignore makes LocalCookbookFromDir ignore chefignore: no chefignore
+// is read, and files it would exclude are kept. Every other selection rule
+// (root dot-directories, the chef-zero sentinel, symlinks, special files)
+// still applies.
+//
+// Chef's loader always applies chefignore, and chef-cli has no way to turn
+// it off, so the Identifiers of a cookbook loaded this way are not the
+// Policyfile identifiers chef-cli would compute for it whenever chefignore
+// excludes anything; do not write them into a Policyfile.lock.json. The
+// option is for packaging a cookbook as-is, such as a Supermarket tarball.
+func SkipChefignore() LocalCookbookOption {
+	return func(o *localCookbookOptions) { o.skipChefignore = true }
+}
+
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
 // pass to CookbooksService.Upload (or, with an identifier,
 // CookbookArtifactsService.Upload). It selects files the way Chef's
@@ -509,24 +533,40 @@ func manifestFileName(rel string) (name, specificity string) {
 //     path; any other symlink, and any special file, is skipped (see
 //     cookbookSymlinkTarget).
 //
-// Metadata comes from metadata.json when present (complete, as compiled by
-// knife or Berkshelf), and otherwise from a static parse of metadata.rb that
-// recognizes only literal calls — see parseMetadataRb for exactly which.
-// Supply a metadata.json, or amend Metadata on the result, for anything
-// computed in Ruby.
+// Metadata comes from LoadCookbookMetadata: metadata.json when present
+// (complete, as compiled by knife or Berkshelf), and otherwise a static parse
+// of metadata.rb that recognizes only literal calls — see ParseMetadataRb for
+// exactly which. Supply a metadata.json, or amend Metadata on the result, for
+// anything computed in Ruby.
 //
 // The cookbook name is the metadata's name, falling back to the base name of
 // dir. version is the version to upload as; when empty the metadata's version
 // is used, and failing that Chef's default of "0.0.0". A version that differs
 // from the one the metadata declares is an error, since the server would
-// reject the mismatch. Every remaining regular file is checksummed as it is
+// reject the mismatch, and so, when version is empty, is a metadata.rb that
+// computes its version (ErrMetadataVersionNotLiteral), which would otherwise
+// upload as 0.0.0. Every remaining regular file is checksummed as it is
 // read; its content is not kept, but streamed from disk again by the upload.
-// An empty directory is an error.
-func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
-	md, err := loadCookbookMetadata(dir)
-	if err != nil {
-		return nil, fmt.Errorf("cinc: read cookbook metadata: %w", err)
+// An empty directory is an error. The selected files are available from
+// Files, and the Policyfile identifier over them from Identifiers. The
+// SkipChefignore option keeps the files chefignore would drop.
+func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*LocalCookbook, error) {
+	var o localCookbookOptions
+	for _, opt := range opts {
+		opt(&o)
 	}
+	loaded, err := LoadCookbookMetadata(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		loaded, err = &CookbookMetadata{}, nil
+	case errors.Is(err, ErrMetadataVersionNotLiteral) && version != "":
+		// The caller has said which version this is.
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	md := *loaded
 	if md.Name == "" {
 		md.Name = filepath.Base(dir)
 	}
@@ -540,9 +580,11 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	}
 	md.Version = version
 	cb := &LocalCookbook{Name: md.Name, Version: version, Metadata: md}
-	ignore, err := LoadChefignore(dir)
-	if err != nil {
-		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
+	ignore := &Chefignore{}
+	if !o.skipChefignore {
+		if ignore, err = LoadChefignore(dir); err != nil {
+			return nil, fmt.Errorf("cinc: read chefignore: %w", err)
+		}
 	}
 	// The cookbook's real location, for telling whether a symlink stays
 	// inside it. dir itself may be reached through a symlink.
@@ -599,6 +641,8 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	if len(cb.files) == 0 {
 		return nil, fmt.Errorf("cinc: no files found in %s", dir)
 	}
+	// Byte order, as Chef compares paths; a walk visits "a/" before "a.rb".
+	slices.SortFunc(cb.files, func(a, b cookbookFile) int { return strings.Compare(a.name, b.name) })
 	return cb, nil
 }
 

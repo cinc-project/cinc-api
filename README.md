@@ -139,18 +139,34 @@ model, so callers don't re-encode server conventions:
   a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
   skips dot-directories at the cookbook root and takes the cookbook name from
   `metadata.json` / `metadata.rb` rather than the directory name.
+- `LoadCookbookMetadata(dir)` / `ParseMetadataJSON(data)` /
+  `ParseMetadataRb(data)` — read a cookbook's metadata into a
+  `CookbookMetadata`, preferring `metadata.json` over `metadata.rb` as Chef's
+  loader does. `metadata.rb` is Ruby and is never evaluated: only calls whose
+  arguments are all literals are read (`name`, `version`, `description`,
+  `long_description`, `maintainer`, `maintainer_email`, `license`,
+  `source_url`, `issues_url`, `depends`, `supports`, `provides`,
+  `chef_version`, `ohai_version`, `gem`, `recipe`, `privacy`,
+  `eager_load_libraries`), normalized as `Chef::Cookbook::Metadata` stores
+  them (`version '1.2'` is `1.2.0`, `depends 'apt', '1.2'` is `= 1.2`), and a
+  call Chef would raise on (a bad constraint, a self-dependency, a wrong
+  argument type) is an error. Other calls are skipped, except a computed
+  `version`, which returns `ErrMetadataVersionNotLiteral` alongside the rest
+  of the metadata rather than silently becoming 0.0.0.
+- `CookbookMetadata.CompiledJSON()` — the `metadata.json` Chef compiles
+  (`knife cookbook metadata`, a Supermarket upload, a `chef export`): every
+  field `Chef::Cookbook::Metadata#to_h` writes, with Chef's defaults
+  (`license "All rights reserved"`, `version "0.0.0"`,
+  `eager_load_libraries true`, empty strings, `{}` and `[]`) for anything
+  unset. A name is required.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,
   dependencies, platforms, chef/ohai versions, …) is sent as the manifest's
   `metadata` block, which Chef Server requires and chef-client reads. It is
-  filled from `metadata.json` when present, otherwise from the literal calls
-  in `metadata.rb` (`name`, `version`, `description`, `long_description`,
-  `maintainer`, `maintainer_email`, `license`, `source_url`, `issues_url`,
-  `depends`, `supports`, `chef_version`, `ohai_version`, `privacy`, each on
-  one line with string literal arguments); metadata.rb is Ruby and is never
-  evaluated, so anything computed there needs a `metadata.json` or an edit to
-  `Metadata`. An empty `version` uses the metadata's version; one that
+  filled by `LoadCookbookMetadata`, so anything computed in `metadata.rb`
+  needs a `metadata.json` or an edit to `Metadata`. An empty `version` uses
+  the metadata's version (an error if `metadata.rb` computes it); one that
   disagrees with it is an error.
 - `UnwrapSearchRow(row)` — the object a search row describes: the `data` of
   a partial-search row (`{"url", "data"}`), the `raw_data` of the
@@ -169,6 +185,18 @@ model, so callers don't re-encode server conventions:
   `users`/`clients`/`groups` arrays (GET) or nested under an `actors` object
   (the PUT body, which erchef echoes back). The flat `actors` array a GET also
   carries is ignored, since the typed lists already hold its names.
+  disagrees with it is an error. `LocalCookbookFromDir(dir, version,
+  SkipChefignore())` keeps the files chefignore would drop (every other
+  selection rule still applies), for packaging a cookbook as-is; chef-cli
+  always applies chefignore, so such a cookbook's `Identifiers()` are not the
+  ones a `Policyfile.lock.json` should carry.
+- `LocalCookbook.Files()` / `LocalCookbook.Identifiers()` — the files
+  `LocalCookbookFromDir` selected (cookbook-relative `Path`, `DiskPath`, MD5
+  `Checksum`), sorted by path, for callers that archive or copy a cookbook;
+  and the Policyfile content identifier and dotted-decimal identifier over
+  exactly those files, as chef-cli computes them for `Policyfile.lock.json`
+  (SHA-1 of the sorted `path:md5` lines), so a lock always names the files an
+  upload sends.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands
