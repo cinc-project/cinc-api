@@ -349,3 +349,15 @@ func TestSetPermission_AcceptsEveryStandardPerm(t *testing.T) {
 		})
 	}
 }
+
+// A list the server returned with a repeated name must lose every copy, or a
+// revoke leaves the actor granted.
+func TestACE_RemoveMembers_RemovesEveryCopy(t *testing.T) {
+	a := &ACE{Actors: []string{"alice", "bob", "alice"}, Groups: []string{}}
+	if !a.RemoveMembers([]string{"alice"}, nil) {
+		t.Fatal("RemoveMembers reported no change")
+	}
+	if len(a.Actors) != 1 || a.Actors[0] != "bob" {
+		t.Errorf("actors = %v, want [bob]", a.Actors)
+	}
+}

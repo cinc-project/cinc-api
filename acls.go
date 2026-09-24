@@ -52,17 +52,12 @@ func addMembers(list *[]string, members []string) bool {
 	return changed
 }
 
-// removeMembers deletes each member found in list, reporting whether list
-// changed.
+// removeMembers deletes every occurrence of each member found in list,
+// reporting whether list changed.
 func removeMembers(list *[]string, members []string) bool {
-	changed := false
-	for _, m := range members {
-		if i := slices.Index(*list, m); i >= 0 {
-			*list = slices.Delete(*list, i, i+1)
-			changed = true
-		}
-	}
-	return changed
+	before := len(*list)
+	*list = slices.DeleteFunc(*list, func(m string) bool { return slices.Contains(members, m) })
+	return len(*list) != before
 }
 
 // ACLPerms are the five standard Chef permissions, in the order Chef lists
