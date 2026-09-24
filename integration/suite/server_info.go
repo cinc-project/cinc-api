@@ -37,3 +37,30 @@ func testStats(t *testing.T, tgt Target, c *cinc.Client) {
 		t.Fatal("Stats.Get returned no metric families")
 	}
 }
+
+// testServerAPIVersion reads the API version negotiation both ways: from the
+// /server_api_version probe, and from the header on an ordinary response.
+// The client asks for version 1, so the server must support it and answer
+// with it.
+func testServerAPIVersion(t *testing.T, _ Target, c *cinc.Client) {
+	v, _, err := c.ServerAPIVersion(t.Context())
+	if err != nil {
+		t.Fatalf("ServerAPIVersion: %v", err)
+	}
+	if v.Min > 1 || v.Max < 1 || v.Request != 1 || v.Response != 1 {
+		t.Fatalf("ServerAPIVersion = %+v, want a range including 1 and 1 negotiated", v)
+	}
+
+	_, resp, err := c.Nodes.List(t.Context())
+	if err != nil {
+		t.Fatalf("Nodes.List: %v", err)
+	}
+	h, ok := resp.ServerAPIVersion()
+	if !ok {
+		t.Fatalf("Nodes.List response has no usable X-Ops-Server-API-Version header: %q",
+			resp.HTTPResponse.Header.Get("X-Ops-Server-API-Version"))
+	}
+	if h != *v {
+		t.Fatalf("header version %+v differs from the probe's %+v", h, *v)
+	}
+}

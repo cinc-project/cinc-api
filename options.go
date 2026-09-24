@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"crypto/rsa"
+	"crypto/x509"
 	"errors"
 	"net/http"
 	"time"
@@ -34,6 +35,7 @@ type options struct {
 	userAgent     string
 	chefVersion   string
 	skipTLSVerify bool
+	rootCAs       *x509.CertPool
 	maxRetries    int
 	// transferTimeout bounds each attempt at a bookshelf file transfer. It
 	// is separate from httpClient.Timeout, which covers API calls.
@@ -73,6 +75,27 @@ func WithChefVersion(v string) Option { return func(o *options) { o.chefVersion 
 // WithSkipTLSVerify disables TLS certificate verification (testing only).
 func WithSkipTLSVerify(skip bool) Option {
 	return func(o *options) { o.skipTLSVerify = skip }
+}
+
+// WithRootCAs verifies the server's certificate against pool instead of the
+// system roots, for a server behind a private CA or with a self-signed
+// certificate. To trust extra CAs as well as the system ones, start the pool
+// from x509.SystemCertPool. A nil pool is ignored.
+//
+// Unlike building your own client for WithHTTPClient, it keeps the client the
+// library would otherwise use, 30s timeout included. With WithHTTPClient it
+// applies to a copy of that client's transport, keeping its tuning and TLS
+// settings (a RoundTripper that is not an *http.Transport is replaced by a
+// copy of http.DefaultTransport, as with WithSkipTLSVerify); the caller's
+// client is not modified. With WithSkipTLSVerify(true) both are set, and as
+// nothing is verified the pool has no effect. Cookbook file transfers trust
+// the pool too.
+func WithRootCAs(pool *x509.CertPool) Option {
+	return func(o *options) {
+		if pool != nil {
+			o.rootCAs = pool
+		}
+	}
 }
 
 // WithMaxRetries sets how many times a failed request is retried: a GET after

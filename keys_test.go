@@ -143,3 +143,54 @@ func TestKeys_NotFound(t *testing.T) {
 		t.Fatal("expected 404")
 	}
 }
+
+func TestKeyScope_Create_Defaults(t *testing.T) {
+	t.Run("generates a non-expiring key by default", func(t *testing.T) {
+		// erchef requires expiration_date and one of public_key or create_key.
+		srv := cinctest.New(t)
+		srv.Handle("POST /users/alice/keys", cinctest.Route{
+			Status: 201,
+			Body:   `{"uri":"http://x/users/alice/keys/laptop","private_key":"-----BEGIN"}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				m := decodeBody(t, body)
+				if m["create_key"] != true || m["expiration_date"] != "infinity" || m["name"] != "laptop" {
+					t.Errorf("POST body = %s, want create_key true and expiration_date infinity", body)
+				}
+			},
+		})
+		c := newTestClient(t, srv.Server)
+		k := &Key{Name: "laptop"}
+		created, _, err := c.Keys.User("alice").Create(context.Background(), k)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if created.PrivateKey == "" {
+			t.Error("no private key returned")
+		}
+		if k.CreateKey || k.ExpirationDate != "" {
+			t.Errorf("Create modified the caller's Key: %+v", k)
+		}
+	})
+
+	t.Run("keeps a supplied public key and expiration", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("POST /organizations/o/clients/node/keys", cinctest.Route{
+			Status: 201,
+			Body:   `{"uri":"http://x/clients/node/keys/k"}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				m := decodeBody(t, body)
+				if m["public_key"] != "PUB" || m["expiration_date"] != "2099-01-01T00:00:00Z" {
+					t.Errorf("POST body = %s", body)
+				}
+				if _, ok := m["create_key"]; ok {
+					t.Errorf("POST body carries create_key: %s", body)
+				}
+			},
+		})
+		c := newTestClient(t, srv.Server)
+		if _, _, err := c.Keys.Client("node").Create(context.Background(),
+			&Key{Name: "k", PublicKey: "PUB", ExpirationDate: "2099-01-01T00:00:00Z"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+}

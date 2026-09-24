@@ -46,11 +46,13 @@ following endpoint families are implemented:
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
-| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / Authenticate                 |
+| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / SetPassword / Authenticate   |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
-`WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`,
-`WithTransferTimeout`. Idempotent GETs are retried on 5xx and network errors,
+`WithChefVersion`, `WithSkipTLSVerify`, `WithRootCAs`, `WithMaxRetries`,
+`WithTransferTimeout`. `WithRootCAs(pool)` verifies the server against a
+private CA while keeping the default client and its 30-second timeout; with
+`WithHTTPClient` it applies to a copy of that client's transport. Idempotent GETs are retried on 5xx and network errors,
 but not on a failed TLS certificate check. Any other request is retried only
 on `503 Service Unavailable`, which means the server did not process it (a
 Chef Server under load answers `POST /users` and `POST /clients` this way);
@@ -73,6 +75,14 @@ model, so callers don't re-encode server conventions:
 
 - `ParseServerURL(raw)` — split `https://host/organizations/<org>` into the
   base server URL and org (the inverse of `NewClient`'s `ServerURL`/`Org`).
+- `FormatServerURL(serverURL, org)` — the inverse of `ParseServerURL`: join
+  them back into `https://host/organizations/<org>`, escaping the org.
+- `Client.ServerURL()` / `Org()` / `ClientName()` — the identity a client
+  was built with, so callers need not keep their own copy.
+- `Response.ServerAPIVersion()` — parse the `X-Ops-Server-API-Version`
+  header every Chef Server response carries (supported min/max, and the
+  requested and answered versions); `Client.ServerAPIVersion(ctx)` probes
+  `GET /server_api_version` for the same when no other response is at hand.
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
@@ -91,6 +101,17 @@ model, so callers don't re-encode server conventions:
   a chef-client run) is overwritten.
 - `Clients.Create` asks the server to generate the client's `default` keypair
   (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
+  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
+  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
+- `Clients.Create` and `Users.Create` ask the server to generate the
+  `default` keypair (returned in `ChefKey.PrivateKey`) unless a `PublicKey` is
+  set; under API v1 the server would otherwise create them without a key.
+  `KeyScope.Create` does the same for an added key, and sends an empty
+  `ExpirationDate` as `"infinity"`, since the server requires one.
+- `Users.SetPassword(name, password)` — change a password. The server's user
+  PUT is a full update, so this re-sends the user's current fields with it.
+- `SuperuserName` — `"pivotal"`, the built-in superuser that creating orgs,
+  `/authenticate_user` and invitation-free org membership are reserved to.
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return
   the new private key (creating one if the client has none).
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a

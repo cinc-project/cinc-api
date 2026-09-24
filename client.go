@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -69,12 +70,12 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 		opt(&o)
 	}
 	hc := o.httpClient
-	if o.skipTLSVerify {
+	if o.skipTLSVerify || o.rootCAs != nil {
 		// Copy the caller's client and swap only the transport, so Jar,
 		// CheckRedirect and any other configuration survive. Building a fresh
 		// http.Client here would silently drop them.
 		clone := *hc
-		clone.Transport = cloneTransportSkipVerify(hc.Transport)
+		clone.Transport = cloneTransportTLS(hc.Transport, o.rootCAs, o.skipTLSVerify)
 		hc = &clone
 	}
 	// Transfers keep the caller's redirect policy (Go's default follows
@@ -122,12 +123,14 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 // to doOnce unfollowed.
 func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
-// cloneTransportSkipVerify returns a transport that mirrors base but skips TLS
-// verification. When base is a caller-supplied *http.Transport its tuning is
-// preserved; otherwise (nil, as with the default client, or a non-Transport
-// RoundTripper) http.DefaultTransport is cloned so HTTP/2, proxy support, and
-// connection pooling are retained. Only InsecureSkipVerify is flipped on.
-func cloneTransportSkipVerify(base http.RoundTripper) *http.Transport {
+// cloneTransportTLS returns a transport that mirrors base with its TLS
+// verification changed: rootCAs, when set, replaces the roots servers are
+// verified against, and skipVerify turns verification off. When base is a
+// caller-supplied *http.Transport its tuning is preserved; otherwise (nil, as
+// with the default client, or a non-Transport RoundTripper) http.DefaultTransport
+// is cloned so HTTP/2, proxy support, and connection pooling are retained.
+// Clone copies the TLS config too, so the caller's is never modified.
+func cloneTransportTLS(base http.RoundTripper, rootCAs *x509.CertPool, skipVerify bool) *http.Transport {
 	tr, ok := base.(*http.Transport)
 	if !ok || tr == nil {
 		tr = http.DefaultTransport.(*http.Transport)
@@ -136,9 +139,25 @@ func cloneTransportSkipVerify(base http.RoundTripper) *http.Transport {
 	if clone.TLSClientConfig == nil {
 		clone.TLSClientConfig = &tls.Config{}
 	}
-	clone.TLSClientConfig.InsecureSkipVerify = true
+	if rootCAs != nil {
+		clone.TLSClientConfig.RootCAs = rootCAs
+	}
+	if skipVerify {
+		clone.TLSClientConfig.InsecureSkipVerify = true
+	}
 	return clone
 }
+
+// ServerURL returns the base server URL the client was built with
+// (scheme://host[:port], any trailing slash trimmed). Pair it with Org and
+// FormatServerURL for the combined https://host/organizations/<org> form.
+func (c *Client) ServerURL() string { return c.baseURLStr }
+
+// Org returns the organization the client's org-scoped requests go to.
+func (c *Client) Org() string { return c.org }
+
+// ClientName returns the client or user name requests are signed as.
+func (c *Client) ClientName() string { return c.clientName }
 
 // orgPath prefixes p with /organizations/<org>.
 func (c *Client) orgPath(p string) string {

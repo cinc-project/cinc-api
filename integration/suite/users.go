@@ -111,3 +111,70 @@ func clientAs(t *testing.T, tgt Target, user, privateKey string) *cinc.Client {
 	}
 	return c
 }
+
+// testUserCreateKeyDefault creates a user without asking for a key. Under API
+// v1 erchef would create it keyless, but Users.Create sends create_key when no
+// public key is given, so the user gets a working default key.
+func testUserCreateKeyDefault(t *testing.T, tgt Target, c *cinc.Client) {
+	ctx := t.Context()
+	name := uniqueName(t, "user")
+	cleanup(t, "user "+name, func(ctx context.Context) error {
+		_, err := c.Users.Delete(ctx, name)
+		return err
+	})
+	res, _, err := c.Users.Create(ctx, &cinc.User{
+		UserName: name, DisplayName: name, Email: name + "@example.com", Password: userPassword(name),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if res.ChefKey.PrivateKey == "" {
+		t.Fatalf("user created without a key request came back without a private key: %+v", res)
+	}
+	keys, _, err := c.Keys.User(name).List(ctx)
+	if err != nil {
+		t.Fatalf("list keys: %v", err)
+	}
+	if len(keys) != 1 || keys[0].Name != "default" {
+		t.Fatalf("keys = %+v, want just default", keys)
+	}
+	// The key signs requests: the user can read its own record.
+	as := clientAs(t, tgt, name, res.ChefKey.PrivateKey)
+	if _, _, err := as.Users.Get(ctx, name); err != nil {
+		t.Fatalf("Get as %s with the generated key: %v", name, err)
+	}
+}
+
+// testUserSetPassword changes a password and checks the rest of the user
+// survives the PUT, which erchef validates as a full user update.
+func testUserSetPassword(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	name, _ := newUser(t, c)
+	if _, err := c.Users.SetPassword(ctx, name, "new-"+userPassword(name)); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	got, _, err := c.Users.Get(ctx, name)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DisplayName != name || got.Email != name+"@example.com" || got.FirstName != "Test" || got.LastName != "User" {
+		t.Fatalf("after SetPassword: user = %+v, want its other fields unchanged", got)
+	}
+}
+
+// testUserSetPasswordAuthenticates checks the new password is the one that
+// works through /authenticate_user.
+func testUserSetPasswordAuthenticates(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	name, _ := newUser(t, c)
+	newPassword := "new-" + userPassword(name)
+	if _, err := c.Users.SetPassword(ctx, name, newPassword); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if _, err := c.Users.Authenticate(ctx, name, newPassword); err != nil {
+		t.Fatalf("Authenticate with the new password: %v", err)
+	}
+	if _, err := c.Users.Authenticate(ctx, name, userPassword(name)); err == nil {
+		t.Fatal("Authenticate with the old password still succeeds")
+	}
+}

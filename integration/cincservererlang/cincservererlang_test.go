@@ -85,9 +85,10 @@ func TestCincServerErlang(t *testing.T) {
 		// answers the server-admin with 403 "missing create permission"
 		// (observed on CINC Server 15.10.125).
 		Gaps: map[string]string{
-			"orgs/lifecycle":          "POST /organizations needs the pivotal superuser; a server-admin gets 403",
-			"users/authenticate":      "POST /authenticate_user needs the pivotal superuser; a server-admin gets 403",
-			"associations/add-member": "POST /organizations/O/users (association without an invitation) needs the pivotal superuser; a server-admin gets 403",
+			"orgs/lifecycle":                   "POST /organizations needs the pivotal superuser; a server-admin gets 403",
+			"users/authenticate":               "POST /authenticate_user needs the pivotal superuser; a server-admin gets 403",
+			"users/set-password-authenticates": "POST /authenticate_user needs the pivotal superuser; a server-admin gets 403",
+			"associations/add-member":          "POST /organizations/O/users (association without an invitation) needs the pivotal superuser; a server-admin gets 403",
 		},
 	})
 }
