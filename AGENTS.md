@@ -154,7 +154,11 @@ down.
 - Cookbook upload is three-step: `POST /sandboxes` → file PUTs to the
   pre-signed URLs the server returned → manifest PUT. `uploadCookbook`
   in `cookbooks.go` is shared with cookbook artifacts.
-- Search supports `WithStart`, `WithRows`, `WithPartial`. Passing
-  `WithPartial` switches the underlying request from GET to POST with
-  the projection map as the body — this is server-required, not a
-  client choice.
+- Search supports `WithStart`, `WithRows`, `WithPartial`,
+  `WithPartialPaths`. A partial projection switches the underlying request
+  from GET to POST with the projection map as the body — this is
+  server-required, not a client choice. Partial rows come back as
+  `{"url", "data"}` and a full data bag search wraps each item in a
+  `Chef::DataBagItem` envelope (`raw_data`); `UnwrapSearchRow` owns both
+  shapes (erchef `chef_wm_search:make_bulk_get_fun`,
+  `chef_data_bag_item:wrap_item`), so callers never match on them.
