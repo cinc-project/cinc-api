@@ -3,6 +3,8 @@ package suite
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	cinc "github.com/cinc-project/cinc-api"
@@ -24,6 +26,51 @@ func testPushRevisionToTwoGroups(t *testing.T, _ Target, c *cinc.Client) {
 		if _, _, err := c.PolicyGroups.GetPolicy(ctx, group, p.name); err != nil {
 			t.Errorf("policy %s not associated with %s: %v", p.name, group, err)
 		}
+	}
+}
+
+// testPushResult checks what PushRevision reports: the first push of a lock
+// uploads its artifact, and pushing the same lock to a second group finds it
+// already on the server.
+func testPushResult(t *testing.T, _ Target, c *cinc.Client) {
+	p := pushPolicy(t, c, uniqueName(t, "staging"), uniqueName(t, "prod"))
+	first, second := p.results[0], p.results[1]
+	want := []string{p.cookbook}
+	if !slices.Equal(first.Uploaded, want) || len(first.AlreadyPresent) != 0 {
+		t.Errorf("first push = uploaded %v, already present %v; want uploaded %v", first.Uploaded, first.AlreadyPresent, want)
+	}
+	if len(second.Uploaded) != 0 || !slices.Equal(second.AlreadyPresent, want) {
+		t.Errorf("re-push = uploaded %v, already present %v; want already present %v", second.Uploaded, second.AlreadyPresent, want)
+	}
+	for i, res := range p.results {
+		if res.Revision == nil || res.Revision.RevisionID != p.revision {
+			t.Errorf("push %d revision = %+v, want %s", i+1, res.Revision, p.revision)
+		}
+	}
+}
+
+// testPushUnderLockName pushes a cookbook whose metadata declares no name
+// from a directory named otherwise (a fetch cache entry), and checks the
+// artifact is stored under the cookbook-lock name, in the URL and in its
+// metadata.
+func testPushUnderLockName(t *testing.T, _ Target, c *cinc.Client) {
+	p := pushPolicyWith(t, c, func(name string) *cinc.LocalCookbook {
+		src := filepath.Join(t.TempDir(), name+"-1.0.0-supermarket")
+		writeFile(t, filepath.Join(src, "metadata.rb"), "version '1.0.0'\n")
+		writeFile(t, filepath.Join(src, "recipes", "default.rb"), uniqueContent(name, "package 'nginx'\n"))
+		cb, err := cinc.LocalCookbookFromDir(src, "1.0.0")
+		if err != nil {
+			t.Fatalf("LocalCookbookFromDir: %v", err)
+		}
+		return cb
+	}, uniqueName(t, "group"))
+
+	got, _, err := c.CookbookArtifacts.Get(t.Context(), p.cookbook, p.identifier)
+	if err != nil {
+		t.Fatalf("CookbookArtifacts.Get: %v", err)
+	}
+	if got.CookbookName != p.cookbook || got.Metadata.Name != p.cookbook {
+		t.Errorf("artifact cookbook_name %q, metadata name %q; want %q", got.CookbookName, got.Metadata.Name, p.cookbook)
 	}
 }
 
@@ -85,15 +132,26 @@ func testPolicyRevisions(t *testing.T, _ Target, c *cinc.Client) {
 	}
 }
 
-// pushedPolicy names what pushPolicy created.
+// pushedPolicy names what pushPolicy created, and holds PushRevision's result
+// for each group in order.
 type pushedPolicy struct {
 	name, revision, cookbook, identifier string
+	results                              []*cinc.PushResult
 }
 
 // pushPolicy pushes a new policy, locked to one freshly uploaded cookbook
 // artifact, to each of groups, and registers the deletion of everything it
 // created.
 func pushPolicy(t *testing.T, c *cinc.Client, groups ...string) pushedPolicy {
+	t.Helper()
+	return pushPolicyWith(t, c, func(name string) *cinc.LocalCookbook {
+		return localCookbook(t, name, "1.0.0", nil)
+	}, groups...)
+}
+
+// pushPolicyWith is pushPolicy with the cookbook for the lock built by
+// cookbook from the lock's cookbook name.
+func pushPolicyWith(t *testing.T, c *cinc.Client, cookbook func(name string) *cinc.LocalCookbook, groups ...string) pushedPolicy {
 	t.Helper()
 	p := pushedPolicy{
 		name:       uniqueName(t, "policy"),
@@ -134,11 +192,13 @@ func pushPolicy(t *testing.T, c *cinc.Client, groups ...string) pushedPolicy {
 		"override_attributes":{},
 		"solution_dependencies":{"Policyfile":[],"dependencies":{}}
 	}`)
-	cookbooks := map[string]*cinc.LocalCookbook{p.cookbook: localCookbook(t, p.cookbook, "1.0.0", nil)}
+	cookbooks := map[string]*cinc.LocalCookbook{p.cookbook: cookbook(p.cookbook)}
 	for _, group := range groups {
-		if _, _, err := c.Policies.PushRevision(t.Context(), lockJSON, group, cookbooks); err != nil {
+		res, _, err := c.Policies.PushRevision(t.Context(), lockJSON, group, cookbooks)
+		if err != nil {
 			t.Fatalf("PushRevision to %s: %v", group, err)
 		}
+		p.results = append(p.results, res)
 	}
 	return p
 }

@@ -31,6 +31,9 @@ following endpoint families are implemented:
 | `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
+| `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
+| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload; `CookbookArtifactListEntry.Has(identifier)` |
+| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete / AddMembers / RemoveMembers   |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
@@ -124,10 +127,16 @@ model, so callers don't re-encode server conventions:
   and trimmed to `num_versions`, whatever the server sent, and an invalid
   `num_versions` is rejected before a request is made. `LatestVersion` is the
   `_latest` version alias.
+  `Policyfile.lock.json` into a `PolicyRevision`. The policy name, revision
+  id, cookbook lock names and identifiers are checked against the patterns
+  Chef Server validates them with, so a returned name is safe to use in a
+  path or generated config.
 - `CookbookLock` accessors — `Origin()` (classify a lock's `source_options` as
-  `path`/`artifactserver`/`git`/`chef_server` and return its location) and
+  `path`/`artifactserver`/`git`/`chef_server` and return its location),
   `PinnedVersion()` (the `source_options` version, falling back to the lock's
-  top-level version).
+  top-level version), `DottedIdentifier()` (the dotted-decimal identifier,
+  falling back to the identifier), `GitRef()` (the git `revision`, falling
+  back to `ref`, `tag`, `branch`) and `GitSubdir()` (the git `rel`).
 - `DataBagItem.Encrypt(secret)` / `Decrypt(secret)` / `IsEncrypted()` — the
   Chef encrypted-data-bag-item codec. `Encrypt` boxes every value except `id`
   in a version-3 (AES-256-GCM) wrapper; `Decrypt` reads versions 1, 2, and 3
@@ -148,10 +157,14 @@ model, so callers don't re-encode server conventions:
   edited item up front. `DataBagItem.Content()` — the item without `id` and
   the `chef_type`/`data_bag` keys a server adds to echoes and search rows.
 - `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
-  `chef push`: upload each pinned cookbook as an artifact, then associate the
-  revision with a policy group. The lock bytes are sent verbatim so no fields
-  are lost. Artifacts the server already has are skipped, so the same lock can
-  be pushed to several groups and a failed push can be retried.
+  `chef push`: upload each pinned cookbook as an artifact under its lock name,
+  then associate the revision with a policy group. The lock bytes are sent
+  verbatim so no fields are lost. Artifacts the server already has are
+  skipped, so the same lock can be pushed to several groups and a failed push
+  can be retried. It returns a `PushResult`: the `Revision`, and the sorted
+  lock names it `Uploaded` and found `AlreadyPresent`. A cookbook whose
+  metadata names a different cookbook, or whose version differs from the
+  lock's, is refused before anything is sent.
 - `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — Chef's chefignore
   handling: the nearest `chefignore` in `dir` or any parent (so a chef-repo's
   `cookbooks/chefignore` applies), with each pattern matched against the

@@ -170,6 +170,11 @@ type LocalCookbook struct {
 	// since the server rejects metadata that disagrees with the URL.
 	Metadata CookbookMetadata
 
+	// nameFromDir records that LocalCookbookFromDir took Name from the
+	// directory because the metadata did not declare one, so the name is a
+	// guess that Policies.PushRevision may replace with the lock's.
+	nameFromDir bool
+
 	files []cookbookFile
 }
 
@@ -540,7 +545,7 @@ func SkipChefignore() LocalCookbookOption {
 // anything computed in Ruby.
 //
 // The cookbook name is the metadata's name, falling back to the base name of
-// dir. version is the version to upload as; when empty the metadata's version
+// dir (which Policies.PushRevision replaces with the cookbook lock's name). version is the version to upload as; when empty the metadata's version
 // is used, and failing that Chef's default of "0.0.0". A version that differs
 // from the one the metadata declares is an error, since the server would
 // reject the mismatch, and so, when version is empty, is a metadata.rb that
@@ -567,7 +572,8 @@ func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*Lo
 		return nil, err
 	}
 	md := *loaded
-	if md.Name == "" {
+	nameFromDir := md.Name == ""
+	if nameFromDir {
 		md.Name = filepath.Base(dir)
 	}
 	switch {
@@ -579,7 +585,7 @@ func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*Lo
 		return nil, fmt.Errorf("cinc: version %q does not match metadata version %q in %s", version, md.Version, dir)
 	}
 	md.Version = version
-	cb := &LocalCookbook{Name: md.Name, Version: version, Metadata: md}
+	cb := &LocalCookbook{Name: md.Name, Version: version, Metadata: md, nameFromDir: nameFromDir}
 	ignore := &Chefignore{}
 	if !o.skipChefignore {
 		if ignore, err = LoadChefignore(dir); err != nil {

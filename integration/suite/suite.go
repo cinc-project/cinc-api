@@ -84,6 +84,8 @@ var cases = []testCase{
 	{"cookbooks/version-listing", testCookbookVersionListing},
 	{"cookbook-artifacts/list-delete", testCookbookArtifactListDelete},
 	{"policies/revisions", testPolicyRevisions},
+	{"policies/push-result", testPushResult},
+	{"policies/push-under-lock-name", testPushUnderLockName},
 	{"acls/cookbook-objects", testCookbookObjectACLs},
 	{"acls/grant-revoke", testGrantRevoke},
 	{"acls/grant-rejects-unknown-members", testGrantRejectsUnknownMembers},
