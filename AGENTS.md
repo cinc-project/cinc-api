@@ -62,19 +62,13 @@ commands and PR conventions).
 ## What the test doubles do not cover
 
 Both suites can be green while the wire contract is wrong. Known gaps, each
-of which has hidden a real bug (all re-checked against cinc-server-ng v0.12.0;
+of which has hidden a real bug (all re-checked against cinc-server-ng v0.14.0;
 file new ones at cinc-project/cinc-server-ng):
 
 - **cinc-server-ng** returns only `all_files` on a cookbook GET (never the
-  per-segment slices), accepts `run_list: null`, and populates both `name`
-  and `groupname` on a group GET. A real Chef Server is stricter or shaped
+  per-segment slices), accepts `run_list: null` on a node, and populates
+  both `name` and `groupname` on a group GET. A real Chef Server is stricter or shaped
   differently on all three.
-- **cinc-server-ng** serves the organization's own ACL at
-  `/organizations/O/_acl[/PERM]` and 404s the real erchef route,
-  `/organizations/O/organizations/_acl[/PERM]`, so `ACLs.GetOrg` and
-  `SetOrgPermission` have no integration coverage. Real erchef has no route
-  for the 3-segment form (its deprecated `'*'` fallback needs a segment
-  there, and there is none at all for `/_acl/PERM`).
 - **cinc-server-ng** generates a client key on `POST /clients` even without
   `create_key`. Real erchef under API v1 creates a keyless client (no
   `chef_key` in the response, no `default` key) unless `create_key: true`
