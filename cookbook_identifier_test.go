@@ -135,3 +135,54 @@ func TestLocalCookbook_IdentifiersCountInCookbookSymlinks(t *testing.T) {
 		t.Fatalf("symlinked cookbook identifier %s != copied cookbook identifier %s", idA, idB)
 	}
 }
+
+// SkipChefignore keeps the files chefignore would drop, including a broken
+// or unreadable chefignore's cookbook, and changes nothing else: root
+// dot-directories, the chef-zero sentinel and out-of-cookbook symlinks are
+// still skipped.
+func TestLocalCookbookFromDir_SkipChefignore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "x")
+	writeTree(t, root, map[string]string{
+		"metadata.rb":                     "name 'x'\n",
+		"chefignore":                      "*.bak\ntmp/*\n",
+		"recipes/default.rb.bak":          "old\n",
+		"tmp/scratch":                     "s\n",
+		".git/HEAD":                       "ref\n",
+		".uploaded-cookbook-version.json": "{}\n",
+		"files/.hidden/keep":              "k\n",
+	})
+	outside := filepath.Join(t.TempDir(), "secret")
+	writeTree(t, filepath.Dir(outside), map[string]string{"secret": "key\n"})
+	if err := os.Symlink(outside, filepath.Join(root, "files", "leak")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	paths := func(cb *LocalCookbook) []string {
+		var out []string
+		for _, f := range cb.Files() {
+			out = append(out, f.Path)
+		}
+		return out
+	}
+
+	honored, err := LocalCookbookFromDir(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := paths(honored), []string{"chefignore", "files/.hidden/keep", "metadata.rb"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("default: got %v, want %v", got, want)
+	}
+
+	skipped, err := LocalCookbookFromDir(root, "", SkipChefignore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"chefignore", "files/.hidden/keep", "metadata.rb", "recipes/default.rb.bak", "tmp/scratch"}
+	if got := paths(skipped); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SkipChefignore: got %v, want %v", got, want)
+	}
+	idHonored, _ := honored.Identifiers()
+	idSkipped, _ := skipped.Identifiers()
+	if idHonored == idSkipped {
+		t.Error("identifiers should differ once chefignored files are included")
+	}
+}

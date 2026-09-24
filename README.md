@@ -185,6 +185,11 @@ model, so callers don't re-encode server conventions:
   `users`/`clients`/`groups` arrays (GET) or nested under an `actors` object
   (the PUT body, which erchef echoes back). The flat `actors` array a GET also
   carries is ignored, since the typed lists already hold its names.
+  disagrees with it is an error. `LocalCookbookFromDir(dir, version,
+  SkipChefignore())` keeps the files chefignore would drop (every other
+  selection rule still applies), for packaging a cookbook as-is; chef-cli
+  always applies chefignore, so such a cookbook's `Identifiers()` are not the
+  ones a `Policyfile.lock.json` should carry.
 - `LocalCookbook.Files()` / `LocalCookbook.Identifiers()` — the files
   `LocalCookbookFromDir` selected (cookbook-relative `Path`, `DiskPath`, MD5
   `Checksum`), sorted by path, for callers that archive or copy a cookbook;

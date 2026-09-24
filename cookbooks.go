@@ -497,6 +497,27 @@ func manifestFileName(rel string) (name, specificity string) {
 	return name, "default"
 }
 
+// LocalCookbookOption configures LocalCookbookFromDir.
+type LocalCookbookOption func(*localCookbookOptions)
+
+type localCookbookOptions struct {
+	skipChefignore bool
+}
+
+// SkipChefignore makes LocalCookbookFromDir ignore chefignore: no chefignore
+// is read, and files it would exclude are kept. Every other selection rule
+// (root dot-directories, the chef-zero sentinel, symlinks, special files)
+// still applies.
+//
+// Chef's loader always applies chefignore, and chef-cli has no way to turn
+// it off, so the Identifiers of a cookbook loaded this way are not the
+// Policyfile identifiers chef-cli would compute for it whenever chefignore
+// excludes anything; do not write them into a Policyfile.lock.json. The
+// option is for packaging a cookbook as-is, such as a Supermarket tarball.
+func SkipChefignore() LocalCookbookOption {
+	return func(o *localCookbookOptions) { o.skipChefignore = true }
+}
+
 // LocalCookbookFromDir walks a cookbook directory into a LocalCookbook ready to
 // pass to CookbooksService.Upload (or, with an identifier,
 // CookbookArtifactsService.Upload). It selects files the way Chef's
@@ -527,8 +548,13 @@ func manifestFileName(rel string) (name, specificity string) {
 // upload as 0.0.0. Every remaining regular file is checksummed as it is
 // read; its content is not kept, but streamed from disk again by the upload.
 // An empty directory is an error. The selected files are available from
-// Files, and the Policyfile identifier over them from Identifiers.
-func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
+// Files, and the Policyfile identifier over them from Identifiers. The
+// SkipChefignore option keeps the files chefignore would drop.
+func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*LocalCookbook, error) {
+	var o localCookbookOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	loaded, err := LoadCookbookMetadata(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -554,9 +580,11 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	}
 	md.Version = version
 	cb := &LocalCookbook{Name: md.Name, Version: version, Metadata: md}
-	ignore, err := LoadChefignore(dir)
-	if err != nil {
-		return nil, fmt.Errorf("cinc: read chefignore: %w", err)
+	ignore := &Chefignore{}
+	if !o.skipChefignore {
+		if ignore, err = LoadChefignore(dir); err != nil {
+			return nil, fmt.Errorf("cinc: read chefignore: %w", err)
+		}
 	}
 	// The cookbook's real location, for telling whether a symlink stays
 	// inside it. dir itself may be reached through a symlink.
