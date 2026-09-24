@@ -61,6 +61,7 @@ var cases = []testCase{
 	{"cookbook-artifacts/upload", testCookbookArtifactUpload},
 	{"policies/push-revision-two-groups", testPushRevisionToTwoGroups},
 	{"roles/lifecycle", testRoleLifecycle},
+	{"roles/run-list-validation", testRoleRunListValidation},
 	{"roles/run-list-edit-normalized", testRoleRunListEditNormalized},
 	{"environments/lifecycle", testEnvironmentLifecycle},
 	{"environments/default-read-only", testEnvironmentDefaultReadOnly},

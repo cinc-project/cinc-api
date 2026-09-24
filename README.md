@@ -105,6 +105,11 @@ model, so callers don't re-encode server conventions:
   duplicates are dropped in order. `Node` and `Role`
   `AddRunListItems`/`RemoveRunListItems` compare and write normalized
   entries, so `nginx` and `recipe[nginx]` are the same item.
+- `ValidateRunListItem(item)` — erchef's run-list entry check
+  (`role[NAME]`, or `COOKBOOK[::RECIPE][@VERSION]`, bare or in
+  `recipe[...]`), wrapping `ErrInvalidRunListItem`, so a malformed entry such
+  as `recipe[` is refused before the server answers the save with a 400.
+  `NormalizeRunList` does not validate; call this on user input first.
 - `Nodes.Modify(name, fn)` — read-modify-write: get the node, apply `fn`,
   and PUT it only if its encoding changed (a rename is refused). Nodes
   have no optimistic concurrency, so a concurrent write in between (such as

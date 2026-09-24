@@ -1,7 +1,10 @@
 package cinc
 
 import (
+	"errors"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -102,4 +105,40 @@ func TestRunListMutationNormalizes(t *testing.T) {
 			t.Errorf("after remove, RunList = %v, want %v", r.RunList, want)
 		}
 	})
+}
+
+// The cases follow erchef's chef_json_validator:run_list_spec, which checks
+// each entry against chef_regex's qualified_recipe, qualified_role or
+// unqualified_recipe pattern according to its prefix.
+func TestValidateRunListItem(t *testing.T) {
+	valid := []string{
+		"nginx", "nginx::server", "my-cb.v2_x", "nginx@1.2", "nginx@1.2.3", "nginx::server@10.0.1",
+		"recipe[nginx]", "recipe[nginx::server]", "recipe[nginx@1.2.3]", "recipe[nginx::server@1.2]",
+		"role[web]", "role[web.v2-x_y]",
+		// Bare names that merely start like a keyword are recipes.
+		"role", "recipe", "roles", "recipes::x",
+	}
+	for _, item := range valid {
+		if err := ValidateRunListItem(item); err != nil {
+			t.Errorf("ValidateRunListItem(%q) = %v, want nil", item, err)
+		}
+	}
+	invalid := []string{
+		"", "recipe[", "recipe[]", "recipe[nginx", "recipe[nginx]]", "recipe[ nginx]",
+		"recipe[nginx::]", "recipe[::server]", "recipe[a::b::c]", "recipe[nginx@1]",
+		"recipe[nginx@1.2.3.4]", "recipe[nginx@v1.2]", "recipe[role[web]]",
+		"role[", "role[]", "role[web", "role[web::x]", "role[web@1.2]", "role[a:b]", "role[web]x",
+		"nginx::", "::nginx", "nginx@", "nginx@1", "ngi nx", "nginx\n", "café", "nginx]", "[nginx]",
+		"Role[web]", "recipe [nginx]",
+	}
+	for _, item := range invalid {
+		err := ValidateRunListItem(item)
+		if !errors.Is(err, ErrInvalidRunListItem) {
+			t.Errorf("ValidateRunListItem(%q) = %v, want ErrInvalidRunListItem", item, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), strconv.Quote(item)) {
+			t.Errorf("ValidateRunListItem(%q) error %q does not name the item", item, err)
+		}
+	}
 }
