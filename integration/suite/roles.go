@@ -99,3 +99,38 @@ func testRoleLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 		t.Fatalf("Get after delete: err = %v, want ErrNotFound", err)
 	}
 }
+
+// testRoleRunListEditNormalized is the role counterpart of
+// testNodeRunListEditNormalized.
+func testRoleRunListEditNormalized(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	name := uniqueName(t, "role")
+	cleanup(t, "role "+name, func(ctx context.Context) error {
+		_, err := c.Roles.Delete(ctx, name)
+		return err
+	})
+	if _, err := c.Roles.Create(ctx, &cinc.Role{
+		Name: name, RunList: []string{"nginx", "recipe[base]"},
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	r, _, err := c.Roles.Get(ctx, name)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	r.RemoveRunListItems("recipe[nginx]")
+	r.AddRunListItems("base", "apache2")
+	if _, _, err := c.Roles.Update(ctx, r); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, _, err := c.Roles.Get(ctx, name)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	want := []string{"recipe[base]", "recipe[apache2]"}
+	if !slices.Equal(got.RunList, want) {
+		t.Fatalf("run_list = %q, want %q", got.RunList, want)
+	}
+}

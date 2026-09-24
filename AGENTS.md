@@ -69,6 +69,11 @@ file new ones at cinc-project/cinc-server-ng):
   per-segment slices), accepts `run_list: null` on a node, and populates
   both `name` and `groupname` on a group GET. A real Chef Server is stricter or shaped
   differently on all three.
+- **cinc-server-ng** stores node and role run lists verbatim. erchef
+  normalizes them on every save (bare `nginx` becomes `recipe[nginx]`, then
+  exact duplicates are dropped; `chef_object_base:normalize_run_list`), so a
+  run list read back from a real server can differ from the one sent.
+  `NormalizeRunList` reproduces erchef's result client-side.
 - **cinc-server-ng** generates a client key on `POST /clients` even without
   `create_key`. Real erchef under API v1 creates a keyless client (no
   `chef_key` in the response, no `default` key) unless `create_key: true`
