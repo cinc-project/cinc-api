@@ -127,3 +127,127 @@ func TestMetadataCompat_PrivacyType(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+// cinc-cli's LoadMetadata compiled a metadata.rb-only cookbook to the
+// metadata.json that `cinc supermarket share` packs, filling Chef's defaults.
+// wantCompiledMinimal is byte-for-byte what it produced for "name 'minimal'".
+const wantCompiledMinimal = `{
+  "name": "minimal",
+  "description": "",
+  "long_description": "",
+  "maintainer": "",
+  "maintainer_email": "",
+  "license": "All rights reserved",
+  "platforms": {},
+  "dependencies": {},
+  "providing": {},
+  "recipes": {},
+  "version": "0.0.0",
+  "source_url": "",
+  "issues_url": "",
+  "privacy": false,
+  "chef_versions": [],
+  "ohai_versions": [],
+  "gems": [],
+  "eager_load_libraries": true
+}
+`
+
+func TestMetadataCompat_CompiledJSONDefaults(t *testing.T) {
+	md, err := ParseMetadataRb([]byte("name 'minimal'\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := md.CompiledJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != wantCompiledMinimal {
+		t.Fatalf("got\n%s\nwant\n%s", got, wantCompiledMinimal)
+	}
+}
+
+// For every field set, the CLI produced this document except where noted:
+// it dropped `privacy true` (writing false) and `eager_load_libraries [...]`
+// (writing true), and escaped <, > and & as <, > and &, which
+// Chef's encoder does not. Map keys are sorted; Chef keeps declaration order,
+// which no JSON reader depends on.
+const wantCompiledEveryField = `{
+  "name": "sample",
+  "description": "Sample cookbook",
+  "long_description": "Longer text",
+  "maintainer": "Sous Chefs <help@sous-chefs.org>",
+  "maintainer_email": "help@sous-chefs.org",
+  "license": "Apache-2.0",
+  "platforms": {
+    "debian": ">= 0.0.0",
+    "ubuntu": ">= 20.04"
+  },
+  "dependencies": {
+    "apt": "~> 7.0"
+  },
+  "providing": {
+    "sample::default": ">= 0.0.0"
+  },
+  "recipes": {
+    "sample::default": "Configures sample"
+  },
+  "version": "1.2.3",
+  "source_url": "https://example.test/source?a=1&b=2",
+  "issues_url": "https://example.test/issues",
+  "privacy": true,
+  "chef_versions": [
+    [
+      ">= 16"
+    ]
+  ],
+  "ohai_versions": [
+    [
+      ">= 17"
+    ]
+  ],
+  "gems": [
+    [
+      "rack",
+      ">= 2"
+    ]
+  ],
+  "eager_load_libraries": [
+    "helpers.rb"
+  ]
+}
+`
+
+func TestMetadataCompat_CompiledJSONEveryField(t *testing.T) {
+	md, err := ParseMetadataRb([]byte(`
+name 'sample'
+maintainer 'Sous Chefs <help@sous-chefs.org>'
+maintainer_email 'help@sous-chefs.org'
+license 'Apache-2.0'
+description 'Sample cookbook'
+long_description 'Longer text'
+version '1.2.3'
+source_url 'https://example.test/source?a=1&b=2'
+issues_url 'https://example.test/issues'
+chef_version '>= 16'
+ohai_version '>= 17'
+supports :ubuntu, '>= 20.04'
+supports 'debian'
+depends 'apt', '~> 7.0'
+provides 'sample::default'
+recipe 'sample::default', 'Configures sample'
+gem 'rack', '>= 2'
+privacy true
+eager_load_libraries ['helpers.rb']
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := md.CompiledJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != wantCompiledEveryField {
+		t.Fatalf("got\n%s\nwant\n%s", got, wantCompiledEveryField)
+	}
+}

@@ -395,3 +395,58 @@ func TestParseMetadataRb_VersionNotLiteral(t *testing.T) {
 		}
 	})
 }
+
+func TestCookbookMetadata_CompiledJSON(t *testing.T) {
+	t.Run("round-trips through ParseMetadataJSON", func(t *testing.T) {
+		md := CookbookMetadata{
+			Name: "x", Version: "1.0.0", EagerLoadLibraries: false,
+			Dependencies: map[string]string{"apt": ">= 1.0"},
+		}
+		data, err := md.CompiledJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		back, err := ParseMetadataJSON(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if back.Name != "x" || back.Version != "1.0.0" || back.EagerLoadLibraries != false ||
+			back.License != "All rights reserved" || back.Dependencies["apt"] != ">= 1.0" {
+			t.Fatalf("got %+v", *back)
+		}
+	})
+	t.Run("a metadata.json value is kept as written", func(t *testing.T) {
+		// from_hash keeps the version as written, and to_h writes it back.
+		md, err := ParseMetadataJSON([]byte(`{"name":"x","version":"1.2","license":"MIT"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := md.CompiledJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"version": "1.2",`) || !strings.Contains(string(data), `"license": "MIT",`) {
+			t.Fatalf("got %s", data)
+		}
+	})
+	t.Run("Attributes and Groupings are not written", func(t *testing.T) {
+		md := CookbookMetadata{Name: "x", Attributes: map[string]any{"a": 1}, Groupings: map[string]any{"g": 1}}
+		data, err := md.CompiledJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "attributes") || strings.Contains(string(data), "groupings") {
+			t.Fatalf("got %s", data)
+		}
+	})
+	t.Run("a name is required", func(t *testing.T) {
+		if _, err := (&CookbookMetadata{Version: "1.0.0"}).CompiledJSON(); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+	t.Run("an unencodable value is an error", func(t *testing.T) {
+		if _, err := (&CookbookMetadata{Name: "x", EagerLoadLibraries: func() {}}).CompiledJSON(); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+}

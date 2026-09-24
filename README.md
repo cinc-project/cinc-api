@@ -153,6 +153,12 @@ model, so callers don't re-encode server conventions:
   argument type) is an error. Other calls are skipped, except a computed
   `version`, which returns `ErrMetadataVersionNotLiteral` alongside the rest
   of the metadata rather than silently becoming 0.0.0.
+- `CookbookMetadata.CompiledJSON()` — the `metadata.json` Chef compiles
+  (`knife cookbook metadata`, a Supermarket upload, a `chef export`): every
+  field `Chef::Cookbook::Metadata#to_h` writes, with Chef's defaults
+  (`license "All rights reserved"`, `version "0.0.0"`,
+  `eager_load_libraries true`, empty strings, `{}` and `[]`) for anything
+  unset. A name is required.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,

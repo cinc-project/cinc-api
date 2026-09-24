@@ -1,6 +1,8 @@
 package cinc
 
 import (
+	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -622,4 +624,91 @@ func gemRequirements(args []string) ([]string, error) {
 	}
 	slices.Sort(reqs)
 	return reqs, nil
+}
+
+// compiledMetadata is Chef::Cookbook::Metadata#to_h: every field, in its
+// order, with nothing omitted.
+type compiledMetadata struct {
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	LongDescription    string            `json:"long_description"`
+	Maintainer         string            `json:"maintainer"`
+	MaintainerEmail    string            `json:"maintainer_email"`
+	License            string            `json:"license"`
+	Platforms          map[string]string `json:"platforms"`
+	Dependencies       map[string]string `json:"dependencies"`
+	Providing          map[string]string `json:"providing"`
+	Recipes            map[string]string `json:"recipes"`
+	Version            string            `json:"version"`
+	SourceURL          string            `json:"source_url"`
+	IssuesURL          string            `json:"issues_url"`
+	Privacy            bool              `json:"privacy"`
+	ChefVersions       [][]string        `json:"chef_versions"`
+	OhaiVersions       [][]string        `json:"ohai_versions"`
+	Gems               [][]string        `json:"gems"`
+	EagerLoadLibraries any               `json:"eager_load_libraries"`
+}
+
+// CompiledJSON returns md as the metadata.json Chef compiles from a
+// metadata.rb: what `knife cookbook metadata` writes, what a cookbook shared
+// to Supermarket carries, and what chef-cli writes into an exported
+// Policyfile repository. It has every field Chef::Cookbook::Metadata#to_h
+// writes, in that order, and fills anything unset with Chef's default:
+// license "All rights reserved", version "0.0.0", eager_load_libraries true,
+// empty strings, and {} or [] for the maps and lists. Values are otherwise
+// written as they are, so metadata parsed by ParseMetadataRb comes out
+// normalized as Chef would write it. Attributes and Groupings, which Chef no
+// longer reads or writes, are left out.
+//
+// Chef requires a name (Metadata#valid?), so an empty Name is an error; knife
+// uses the cookbook's directory name when metadata.rb sets none. The output
+// is indented by two spaces and ends in a newline. Unlike Go's default, <, >
+// and & are not escaped, as Chef's encoder does not; map keys are sorted,
+// where Chef keeps the order metadata.rb declared them in.
+func (md *CookbookMetadata) CompiledJSON() ([]byte, error) {
+	if md.Name == "" {
+		return nil, errors.New("cinc: cookbook metadata needs a name to compile to metadata.json")
+	}
+	doc := compiledMetadata{
+		Name: md.Name, Description: md.Description, LongDescription: md.LongDescription,
+		Maintainer: md.Maintainer, MaintainerEmail: md.MaintainerEmail,
+		License:      cmp.Or(md.License, "All rights reserved"),
+		Platforms:    orEmptyMap(md.Platforms),
+		Dependencies: orEmptyMap(md.Dependencies),
+		Providing:    orEmptyMap(md.Providing),
+		Recipes:      orEmptyMap(md.Recipes),
+		Version:      cmp.Or(md.Version, "0.0.0"),
+		SourceURL:    md.SourceURL, IssuesURL: md.IssuesURL, Privacy: md.Privacy,
+		ChefVersions:       orEmptyList(md.ChefVersions),
+		OhaiVersions:       orEmptyList(md.OhaiVersions),
+		Gems:               orEmptyList(md.Gems),
+		EagerLoadLibraries: md.EagerLoadLibraries,
+	}
+	if doc.EagerLoadLibraries == nil {
+		doc.EagerLoadLibraries = true
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(doc); err != nil {
+		return nil, fmt.Errorf("cinc: encode metadata.json: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// orEmptyMap returns m, or an empty map in place of nil so it encodes as {}.
+func orEmptyMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+// orEmptyList returns l, or an empty list in place of nil so it encodes as [].
+func orEmptyList(l [][]string) [][]string {
+	if l == nil {
+		return [][]string{}
+	}
+	return l
 }
