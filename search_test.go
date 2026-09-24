@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -384,5 +386,259 @@ func TestSearch_Indexes(t *testing.T) {
 	}
 	if idx["node"] == "" || idx["role"] == "" || idx["client"] == "" {
 		t.Fatalf("Indexes = %v", idx)
+	}
+}
+
+// Search row fixtures in the shapes erchef (chef_wm_search.erl) and
+// cinc-server-ng (internal/api/search.go) put on the wire.
+const (
+	// A partial search (POST) row: exactly url and data.
+	partialNodeRow = `{"url":"https://chef.example/organizations/o/nodes/web01","data":{"name":"web01","kernel.release":"6.1.0"}}`
+	// A full search of a data bag index: chef_data_bag_item:wrap_item/3.
+	wrappedItemRow = `{"name":"data_bag_item_users_alice","json_class":"Chef::DataBagItem","chef_type":"data_bag_item","data_bag":"users","raw_data":{"id":"alice","shell":"/bin/zsh"}}`
+	// A full node search row: the stored node, unchanged.
+	fullNodeRow = `{"name":"web01","chef_type":"node","json_class":"Chef::Node","chef_environment":"prod","run_list":["recipe[base]"],"normal":{"tier":"web"},"default":{},"override":{},"automatic":{"platform":"ubuntu"}}`
+)
+
+func TestUnwrapSearchRow(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		want string
+	}{
+		{"partial row yields data", partialNodeRow, `{"name":"web01","kernel.release":"6.1.0"}`},
+		{"partial data bag row yields data", `{"url":"https://h/organizations/o/data/users/alice","data":{"shell":"/bin/zsh"}}`, `{"shell":"/bin/zsh"}`},
+		{"wrapped data bag item yields raw_data", wrappedItemRow, `{"id":"alice","shell":"/bin/zsh"}`},
+		{"full node unchanged", fullNodeRow, fullNodeRow},
+		// Objects that merely carry an envelope's keys are not envelopes.
+		{"item with url and data plus id unchanged", `{"id":"x","url":"u","data":{"a":1}}`, `{"id":"x","url":"u","data":{"a":1}}`},
+		{"data without url unchanged", `{"name":"n","data":{"a":1}}`, `{"name":"n","data":{"a":1}}`},
+		{"partial with non-string url unchanged", `{"url":1,"data":{}}`, `{"url":1,"data":{}}`},
+		{"partial with non-object data unchanged", `{"url":"u","data":"x"}`, `{"url":"u","data":"x"}`},
+		{"partial with null data unchanged", `{"url":"u","data":null}`, `{"url":"u","data":null}`},
+		{"raw_data without class unchanged", `{"id":"x","raw_data":{"a":1}}`, `{"id":"x","raw_data":{"a":1}}`},
+		{"class without chef_type unchanged", `{"json_class":"Chef::DataBagItem","raw_data":{"id":"x"}}`, `{"json_class":"Chef::DataBagItem","raw_data":{"id":"x"}}`},
+		{"chef_type without class unchanged", `{"chef_type":"data_bag_item","raw_data":{"id":"x"}}`, `{"chef_type":"data_bag_item","raw_data":{"id":"x"}}`},
+		{"envelope with non-object raw_data unchanged", `{"json_class":"Chef::DataBagItem","chef_type":"data_bag_item","raw_data":[1]}`, `{"json_class":"Chef::DataBagItem","chef_type":"data_bag_item","raw_data":[1]}`},
+		{"array unchanged", `[1,2]`, `[1,2]`},
+		{"null unchanged", `null`, `null`},
+		{"invalid JSON unchanged", `{"url":`, `{"url":`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := UnwrapSearchRow(json.RawMessage(tt.row))
+			if string(got) != tt.want {
+				t.Errorf("UnwrapSearchRow(%s) = %s, want %s", tt.row, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWithPartialPaths(t *testing.T) {
+	var p searchParams
+	WithPartialPaths("name", "kernel.release", "", "a.b.c")(&p)
+	want := map[string][]string{
+		"name":           {"name"},
+		"kernel.release": {"kernel", "release"},
+		"a.b.c":          {"a", "b", "c"},
+	}
+	if !reflect.DeepEqual(p.partial, want) {
+		t.Fatalf("partial = %v, want %v", p.partial, want)
+	}
+}
+
+// TestWithPartialPaths_ComposesWithPartial checks that projection options
+// accumulate in order, a later one winning on a shared key, and that
+// WithPartial never writes to the caller's map.
+func TestWithPartialPaths_ComposesWithPartial(t *testing.T) {
+	keys := map[string][]string{"n": {"name"}, "platform": {"automatic", "platform"}}
+	var p searchParams
+	for _, o := range []SearchOption{
+		WithPartial(keys),
+		WithPartialPaths("platform", "tier"),
+		WithPartial(map[string][]string{"tier": {"normal", "tier"}}),
+	} {
+		o(&p)
+	}
+	want := map[string][]string{
+		"n":        {"name"},
+		"platform": {"platform"},
+		"tier":     {"normal", "tier"},
+	}
+	if !reflect.DeepEqual(p.partial, want) {
+		t.Fatalf("partial = %v, want %v", p.partial, want)
+	}
+	if len(keys) != 2 || !reflect.DeepEqual(keys["platform"], []string{"automatic", "platform"}) {
+		t.Fatalf("WithPartial modified the caller's map: %v", keys)
+	}
+}
+
+func TestSearch_QueryWithPartialPathsPosts(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/search/node", cinctest.Route{
+		Body: `{"total":1,"start":0,"rows":[` + partialNodeRow + `]}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var got map[string][]string
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("decode body %s: %v", body, err)
+			}
+			want := map[string][]string{"kernel.release": {"kernel", "release"}}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("body = %v, want %v", got, want)
+			}
+		}})
+	c := newTestClient(t, srv.Server)
+	res, _, err := c.Search.Query(context.Background(), "node", "*:*", WithPartialPaths("kernel.release"))
+	if err != nil || len(res.Rows) != 1 {
+		t.Fatalf("Query: %+v %v", res, err)
+	}
+}
+
+func TestSearch_Nodes(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node", cinctest.Route{
+		Body: `{"total":2,"start":0,"rows":[` + fullNodeRow + `,{"name":"db01","run_list":[]}]}`,
+		Assert: func(t *testing.T, r *http.Request, _ []byte) {
+			if q := r.URL.Query().Get("q"); q != "role:web" {
+				t.Errorf("q = %q", q)
+			}
+		}})
+	c := newTestClient(t, srv.Server)
+	var got []*Node
+	for n, err := range c.Search.Nodes(context.Background(), "role:web") {
+		if err != nil {
+			t.Fatalf("Nodes: %v", err)
+		}
+		got = append(got, n)
+	}
+	if len(got) != 2 || got[0].Name != "web01" || got[1].Name != "db01" {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].Environment != "prod" || got[0].Automatic["platform"] != "ubuntu" || got[0].Normal["tier"] != "web" {
+		t.Errorf("node not fully decoded: %+v", got[0])
+	}
+}
+
+func TestSearch_NodesRejectsPartial(t *testing.T) {
+	srv := cinctest.New(t) // no routes: any request fails the test
+	c := newTestClient(t, srv.Server)
+	for _, opt := range []SearchOption{
+		WithPartial(map[string][]string{"n": {"name"}}),
+		WithPartialPaths("name"),
+	} {
+		n := 0
+		for node, err := range c.Search.Nodes(context.Background(), "*:*", opt) {
+			n++
+			if node != nil || err == nil || !strings.Contains(err.Error(), "partial") {
+				t.Errorf("got (%v, %v), want a nil node and an error naming partial search", node, err)
+			}
+		}
+		if n != 1 {
+			t.Errorf("yielded %d times, want once", n)
+		}
+	}
+}
+
+func TestSearch_NodesYieldsPageError(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node", cinctest.Route{Status: http.StatusForbidden, Body: `{"error":["no"]}`})
+	c := newTestClient(t, srv.Server)
+	n := 0
+	for node, err := range c.Search.Nodes(context.Background(), "*:*") {
+		n++
+		if node != nil || err == nil {
+			t.Errorf("got (%v, %v), want an error", node, err)
+		}
+	}
+	if n != 1 {
+		t.Errorf("yielded %d times, want once", n)
+	}
+}
+
+func TestSearch_NodesDecodeError(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node", cinctest.Route{
+		Body: `{"total":2,"start":0,"rows":[{"name":7},{"name":"never"}]}`})
+	c := newTestClient(t, srv.Server)
+	n := 0
+	for node, err := range c.Search.Nodes(context.Background(), "*:*") {
+		n++
+		if node != nil || err == nil || !strings.Contains(err.Error(), "node") {
+			t.Errorf("got (%v, %v), want a decode error", node, err)
+		}
+	}
+	if n != 1 {
+		t.Errorf("yielded %d times, want once (iteration ends on a bad row)", n)
+	}
+}
+
+func TestSearch_NodesBreakStops(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/node", cinctest.Route{
+		Body: `{"total":2,"start":0,"rows":[` + fullNodeRow + `,{"name":"db01"}]}`})
+	c := newTestClient(t, srv.Server)
+	n := 0
+	for range c.Search.Nodes(context.Background(), "*:*") {
+		n++
+		break
+	}
+	if n != 1 {
+		t.Errorf("yielded %d times after break, want 1", n)
+	}
+}
+
+func TestSearch_DataBagItems(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/users", cinctest.Route{
+		Body: `{"total":2,"start":0,"rows":[` + wrappedItemRow +
+			`,{"name":"data_bag_item_users_bob","json_class":"Chef::DataBagItem","chef_type":"data_bag_item","data_bag":"users","raw_data":{"id":"bob","groups":["ops"]}}]}`,
+		Assert: func(t *testing.T, r *http.Request, _ []byte) {
+			if q := r.URL.Query().Get("q"); q != "shell:*" {
+				t.Errorf("q = %q", q)
+			}
+		}})
+	c := newTestClient(t, srv.Server)
+	var got []DataBagItem
+	for item, err := range c.Search.DataBagItems(context.Background(), "users", "shell:*") {
+		if err != nil {
+			t.Fatalf("DataBagItems: %v", err)
+		}
+		got = append(got, item)
+	}
+	want := []DataBagItem{
+		{"id": "alice", "shell": "/bin/zsh"},
+		{"id": "bob", "groups": []any{"ops"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestSearch_DataBagItemsPartial(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("POST /organizations/o/search/users", cinctest.Route{
+		Body: `{"total":1,"start":0,"rows":[{"url":"https://h/organizations/o/data/users/alice","data":{"id":"alice","shell":"/bin/zsh"}}]}`})
+	c := newTestClient(t, srv.Server)
+	var got []DataBagItem
+	for item, err := range c.Search.DataBagItems(context.Background(), "users", "*:*", WithPartialPaths("id", "shell")) {
+		if err != nil {
+			t.Fatalf("DataBagItems: %v", err)
+		}
+		got = append(got, item)
+	}
+	if len(got) != 1 || got[0].ID() != "alice" || got[0]["shell"] != "/bin/zsh" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestSearch_DataBagItemsDecodeError(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/search/users", cinctest.Route{
+		Body: `{"total":1,"start":0,"rows":[[1]]}`})
+	c := newTestClient(t, srv.Server)
+	for item, err := range c.Search.DataBagItems(context.Background(), "users", "*:*") {
+		if item != nil || err == nil || !strings.Contains(err.Error(), "users") {
+			t.Errorf("got (%v, %v), want a decode error naming the bag", item, err)
+		}
 	}
 }

@@ -42,7 +42,7 @@ following endpoint families are implemented:
 | `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
 | `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete / Environments / EnvironmentRunList |
-| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`), `All` (`iter.Seq2` over rows, one page in memory at a time), `SearchAll`, `Indexes` |
+| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`/`WithPartialPaths`), `All` (`iter.Seq2` over rows, one page in memory at a time), `Nodes` (rows decoded as `*Node`), `DataBagItems` (rows unwrapped to `DataBagItem`), `SearchAll`, `Indexes` |
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
@@ -119,6 +119,11 @@ model, so callers don't re-encode server conventions:
   evaluated, so anything computed there needs a `metadata.json` or an edit to
   `Metadata`. An empty `version` uses the metadata's version; one that
   disagrees with it is an error.
+- `UnwrapSearchRow(row)` — the object a search row describes: the `data` of
+  a partial-search row (`{"url", "data"}`), the `raw_data` of the
+  `Chef::DataBagItem` envelope a full data bag search wraps each item in, and
+  any other row unchanged. `WithPartialPaths("kernel.release", ...)` builds a
+  partial search from dotted paths, keyed by the path itself.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands
