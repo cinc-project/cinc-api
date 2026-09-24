@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,17 +173,27 @@ type LocalCookbook struct {
 // CookbooksService accesses the /cookbooks endpoints.
 type CookbooksService struct{ client *Client }
 
-// List returns all cookbooks and their available versions.
+// List returns every cookbook with only its latest version
+// (GET /cookbooks). It is ListVersions(ctx, ""): the Chef Server lists one
+// version per cookbook unless asked for more.
 func (s *CookbooksService) List(ctx context.Context) (map[string]CookbookListEntry, *Response, error) {
-	return do[map[string]CookbookListEntry](ctx, s.client, "GET",
-		s.client.orgPath("/cookbooks"), nil)
+	return s.ListVersions(ctx, "")
+}
+
+// ListVersions returns every cookbook with up to numVersions of its versions
+// (GET /cookbooks?num_versions=N): "all" for every version, "n" for the n
+// newest, or "" for the server default of one. Anything else is rejected
+// before a request is sent. Each entry's versions are newest-first, compared
+// with CompareCookbookVersions, whatever order the server sent them in.
+func (s *CookbooksService) ListVersions(ctx context.Context, numVersions string) (map[string]CookbookListEntry, *Response, error) {
+	return getCookbookList(ctx, s.client, s.client.orgPath("/cookbooks"), numVersions, 1)
 }
 
 // ListLatest returns the name->URL index of the latest version of each
 // cookbook (GET /cookbooks/_latest).
 func (s *CookbooksService) ListLatest(ctx context.Context) (map[string]string, *Response, error) {
 	return do[map[string]string](ctx, s.client, "GET",
-		s.client.orgPath("/cookbooks/_latest"), nil)
+		s.client.orgPath("/cookbooks/"+LatestVersion), nil)
 }
 
 // ListRecipes returns every recipe in the latest version of each cookbook
@@ -196,15 +205,12 @@ func (s *CookbooksService) ListRecipes(ctx context.Context) ([]string, *Response
 
 // GetVersions returns the available versions of a single cookbook
 // (GET /cookbooks/NAME), unwrapped from the server's single-key
-// {name: {url, versions}} envelope. numVersions limits the versions returned
-// ("" for the server default of one, "all" for every version, or "n");
-// versions come back newest-first.
+// {name: {url, versions}} envelope. numVersions limits the versions returned:
+// "" or "all" for every version, or "n" for the n newest; anything else is
+// rejected before a request is sent. erchef ignores num_versions on this
+// endpoint, so the client applies the limit. Versions are newest-first.
 func (s *CookbooksService) GetVersions(ctx context.Context, name, numVersions string) (*CookbookListEntry, *Response, error) {
-	path := s.client.orgPath("/cookbooks/" + esc(name))
-	if numVersions != "" {
-		path += "?num_versions=" + url.QueryEscape(numVersions)
-	}
-	m, resp, err := do[map[string]CookbookListEntry](ctx, s.client, "GET", path, nil)
+	m, resp, err := getCookbookList(ctx, s.client, s.client.orgPath("/cookbooks/"+esc(name)), numVersions, allVersions)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -234,16 +240,28 @@ func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook) error 
 	return uploadCookbook(ctx, s.client, "/cookbooks", cb)
 }
 
-// Download fetches a cookbook version manifest and writes every file in all
-// nine segments to destDir, recreating the path hierarchy. version may be the
-// literal string "_latest". File content is fetched from pre-signed bookshelf
-// URLs using a plain (unsigned) HTTP GET, matching the upload path in sandboxes.go.
-// Each file is verified against the manifest's MD5 checksum and written
-// atomically; files already in destDir with a matching checksum are skipped.
+// Download fetches a cookbook version manifest and writes its files to
+// destDir (see DownloadFiles). version may be LatestVersion. To learn the
+// resolved version before choosing destDir, Get the manifest and pass it to
+// DownloadFiles instead, which saves fetching it twice.
 func (s *CookbooksService) Download(ctx context.Context, name, version, destDir string) error {
 	cb, _, err := s.Get(ctx, name, version)
 	if err != nil {
 		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
+	}
+	return s.DownloadFiles(ctx, cb, destDir)
+}
+
+// DownloadFiles writes every file of an already-fetched cookbook manifest (a
+// Cookbooks.Get or CookbookArtifacts.Get result) to destDir, recreating the
+// path hierarchy. File content is fetched from the manifest's pre-signed
+// bookshelf URLs using a plain (unsigned) HTTP GET, matching the upload path
+// in sandboxes.go; no API request is made. Each file is verified against the
+// manifest's MD5 checksum and written atomically; files already in destDir
+// with a matching checksum are skipped.
+func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, destDir string) error {
+	if cb == nil {
+		return fmt.Errorf("cinc: DownloadFiles: nil cookbook manifest")
 	}
 	// Resolve and validate every destination path up front (cheap, sequential)
 	// so a traversal attempt fails fast before any file is fetched or written.

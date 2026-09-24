@@ -2,7 +2,6 @@ package cinc
 
 import (
 	"context"
-	"net/url"
 )
 
 // Environment is a Chef environment object.
@@ -53,29 +52,26 @@ func (s *EnvironmentsService) List(ctx context.Context) (map[string]string, *Res
 	return s.res().list(ctx)
 }
 
-// envCookbookQuery builds an environment cookbook path, appending the optional
-// num_versions query parameter when non-empty.
-func (s *EnvironmentsService) envPath(env, suffix, numVersions string) string {
-	p := s.client.orgPath("/environments/" + esc(env) + suffix)
-	if numVersions != "" {
-		p += "?num_versions=" + url.QueryEscape(numVersions)
-	}
-	return p
+// envPath is the path of an environment sub-endpoint.
+func (s *EnvironmentsService) envPath(env, suffix string) string {
+	return s.client.orgPath("/environments/" + esc(env) + suffix)
 }
 
 // ListCookbooks returns the cookbooks (and versions) available to the
 // environment, keyed by cookbook name. numVersions limits the versions per
-// cookbook ("" for the server default, "all" for every version, or "n").
+// cookbook: "" for the server default of one, "all" for every version, or
+// "n" for the n newest; anything else is rejected before a request is sent.
+// Versions are newest-first.
 func (s *EnvironmentsService) ListCookbooks(ctx context.Context, env, numVersions string) (map[string]CookbookListEntry, *Response, error) {
-	return do[map[string]CookbookListEntry](ctx, s.client, "GET",
-		s.envPath(env, "/cookbooks", numVersions), nil)
+	return getCookbookList(ctx, s.client, s.envPath(env, "/cookbooks"), numVersions, 1)
 }
 
 // GetCookbook returns the versions of one cookbook available to the
 // environment, filtered by the environment's version constraints.
+// numVersions is as for ListCookbooks, except that "" means every version
+// (the server default here). Versions are newest-first.
 func (s *EnvironmentsService) GetCookbook(ctx context.Context, env, name, numVersions string) (map[string]CookbookListEntry, *Response, error) {
-	return do[map[string]CookbookListEntry](ctx, s.client, "GET",
-		s.envPath(env, "/cookbooks/"+esc(name), numVersions), nil)
+	return getCookbookList(ctx, s.client, s.envPath(env, "/cookbooks/"+esc(name)), numVersions, allVersions)
 }
 
 // CookbookVersions solves the given run list against the environment and

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,12 +14,14 @@ import (
 // rawRequest sends a request signed as tgt.Admin exactly as given — method,
 // path, server API version and body — and returns the status and body. It is
 // for the negative cases: requests the client's own API cannot produce, to
-// check that the server rejects them.
+// check that the server rejects them. path may carry a query string, which
+// is sent but, as the protocol requires, not signed.
 func rawRequest(t *testing.T, tgt Target, method, path, apiVersion string, body []byte) (int, []byte) {
 	t.Helper()
+	signedPath, _, _ := strings.Cut(path, "?")
 	hdrs, err := signing.SignHeaders(signing.Request{
 		Method:     method,
-		Path:       path,
+		Path:       signedPath,
 		Body:       body,
 		UserID:     tgt.Admin,
 		Timestamp:  time.Now().UTC().Format("2006-01-02T15:04:05Z"),

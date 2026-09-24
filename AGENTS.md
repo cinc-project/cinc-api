@@ -94,6 +94,13 @@ file new ones at cinc-project/cinc-server-ng):
 - **cinc-server-ng** lets a non-superuser take the `admins` group off an
   object's `grant` ACE; erchef refuses that with a 403 ("Admin group cannot
   be removed from the Grant ACE"), not a 400.
+- **cinc-server-ng** lists every cookbook version on `GET /cookbooks` (and
+  an environment's `/cookbooks`) without `num_versions`, where erchef lists
+  one; accepts an invalid `num_versions` erchef rejects with a 400; and
+  honors `num_versions` on `GET /cookbooks/NAME`, which erchef ignores
+  (cinc-server-ng#212). The client validates `num_versions` and sorts and
+  trims every version list itself, so callers see erchef's semantics on
+  both; the raw-wire suite cases pin the server behaviour.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.

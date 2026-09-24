@@ -76,6 +76,8 @@ func run(m *testing.M) int {
 			"cookbooks/rejects-all-files-under-api-v1":    "accepts all_files under API v1: https://github.com/cinc-project/cinc-server-ng/issues/160",
 			"clients/rejects-key-field-on-update":         "accepts and stores create_key on a client PUT: https://github.com/cinc-project/cinc-server-ng/issues/165",
 			"acls/revoke-keeps-admins-on-grant":           "lets a non-superuser remove admins from a grant ACE: https://github.com/cinc-project/cinc-server-ng/issues/211",
+			"cookbooks/list-defaults-to-one-version":      "lists every version on GET /cookbooks without num_versions: https://github.com/cinc-project/cinc-server-ng/issues/212",
+			"cookbooks/rejects-invalid-num-versions":      "accepts an invalid num_versions: https://github.com/cinc-project/cinc-server-ng/issues/212",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()
