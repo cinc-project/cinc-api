@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -525,7 +526,8 @@ func manifestFileName(rel string) (name, specificity string) {
 // computes its version (ErrMetadataVersionNotLiteral), which would otherwise
 // upload as 0.0.0. Every remaining regular file is checksummed as it is
 // read; its content is not kept, but streamed from disk again by the upload.
-// An empty directory is an error.
+// An empty directory is an error. The selected files are available from
+// Files, and the Policyfile identifier over them from Identifiers.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	loaded, err := LoadCookbookMetadata(dir)
 	switch {
@@ -611,6 +613,8 @@ func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
 	if len(cb.files) == 0 {
 		return nil, fmt.Errorf("cinc: no files found in %s", dir)
 	}
+	// Byte order, as Chef compares paths; a walk visits "a/" before "a.rb".
+	slices.SortFunc(cb.files, func(a, b cookbookFile) int { return strings.Compare(a.name, b.name) })
 	return cb, nil
 }
 

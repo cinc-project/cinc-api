@@ -1,0 +1,3 @@
+# Ignore editor and scratch files
+*.bak
+*.tmp

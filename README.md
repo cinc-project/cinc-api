@@ -185,6 +185,13 @@ model, so callers don't re-encode server conventions:
   `users`/`clients`/`groups` arrays (GET) or nested under an `actors` object
   (the PUT body, which erchef echoes back). The flat `actors` array a GET also
   carries is ignored, since the typed lists already hold its names.
+- `LocalCookbook.Files()` / `LocalCookbook.Identifiers()` — the files
+  `LocalCookbookFromDir` selected (cookbook-relative `Path`, `DiskPath`, MD5
+  `Checksum`), sorted by path, for callers that archive or copy a cookbook;
+  and the Policyfile content identifier and dotted-decimal identifier over
+  exactly those files, as chef-cli computes them for `Policyfile.lock.json`
+  (SHA-1 of the sorted `path:md5` lines), so a lock always names the files an
+  upload sends.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands
