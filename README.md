@@ -30,7 +30,7 @@ following endpoint families are implemented:
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
-| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
+| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
@@ -93,6 +93,20 @@ model, so callers don't re-encode server conventions:
   in a version-3 (AES-256-GCM) wrapper; `Decrypt` reads versions 1, 2, and 3
   and is byte-for-byte compatible with knife/chef-client. The AES key is
   `sha256(secret)`; values round-trip through Chef's `json_wrapper` boxing.
+  `Encrypt` refuses an item that already holds an encrypted value
+  (`ErrAlreadyEncrypted`) rather than encrypting the ciphertext again.
+- `Items(bag).GetDecrypted(id, secret)` / `CreateEncrypted(item, secret)` /
+  `UpdateEncrypted(item, secret)` — the encrypted read and write paths in one
+  call each; an edit is `GetDecrypted`, a change, then `UpdateEncrypted`.
+- `LoadDataBagSecret(path)` / `ParseDataBagSecret(data)` — read a shared
+  secret file exactly as Chef's `EncryptedDataBagItem.load_secret` does:
+  leading and trailing NUL and ASCII whitespace stripped, UTF-8 required, an
+  empty secret refused (`ErrEmptyDataBagSecret`). Chef's remote (URL) secrets
+  are not supported.
+- `DataBagItem.Validate()` — the non-empty string `id` check `Create`,
+  `Update` and `Encrypt` apply (`ErrMissingDataBagItemID`), for vetting an
+  edited item up front. `DataBagItem.Content()` — the item without `id` and
+  the `chef_type`/`data_bag` keys a server adds to echoes and search rows.
 - `Policies.PushRevision(lockJSON, group, cookbooks)` — the server-side half of
   `chef push`: upload each pinned cookbook as an artifact, then associate the
   revision with a policy group. The lock bytes are sent verbatim so no fields

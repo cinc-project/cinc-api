@@ -64,6 +64,7 @@ var cases = []testCase{
 	{"data-bags/lifecycle", testDataBagLifecycle},
 	{"data-bags/encrypted-round-trip", testDataBagEncryptedRoundTrip},
 	{"data-bags/chef-encrypted-formats", testDataBagChefEncryptedFormats},
+	{"data-bags/encrypted-edit", testDataBagEncryptedEdit},
 	{"keys/client-lifecycle", testClientKeyLifecycle},
 	{"keys/user-lifecycle", testUserKeyLifecycle},
 	{"keys/rename", testKeyRename},

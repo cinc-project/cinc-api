@@ -325,3 +325,61 @@ func TestDecrypt_EncryptedServerKeyNamesRoundTrip(t *testing.T) {
 		t.Errorf("Decrypt = %v, want %v", got, in)
 	}
 }
+
+// Encrypting an item that already holds encryption wrappers would wrap the
+// ciphertext again, and the result would decrypt to wrappers rather than to
+// the plaintext. Encrypt refuses, before touching any value, when any
+// non-"id" value is a well-formed wrapper, not only when IsEncrypted: a
+// mixed item (an encrypted file with one plaintext key added) is refused too.
+func TestDataBagItem_Encrypt_RefusesEncryptedItem(t *testing.T) {
+	secret := []byte("s3cret")
+	enc, err := DataBagItem{"id": "db", "password": "hunter2"}.Encrypt(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withServerKeys := DataBagItem{"chef_type": "data_bag_item", "data_bag": "creds"}
+	mixed := DataBagItem{"extra": "plaintext"}
+	for k, v := range enc {
+		withServerKeys[k] = v
+		mixed[k] = v
+	}
+	for name, item := range map[string]DataBagItem{
+		"encrypted":        enc,
+		"with server keys": withServerKeys,
+		"mixed":            mixed,
+		"chef v1 fixture":  {"id": "x", "a": mustWrapper(t, fixtureV1String)},
+	} {
+		if _, err := item.Encrypt(secret); !errors.Is(err, ErrAlreadyEncrypted) {
+			t.Errorf("%s: Encrypt err = %v, want ErrAlreadyEncrypted", name, err)
+		}
+	}
+}
+
+// Plaintext values that merely look a little like a wrapper are encrypted as
+// usual: only a map with a supported numeric version, string encrypted_data
+// and iv, and the version's hmac or auth_tag counts as one.
+func TestDataBagItem_Encrypt_WrapperLookalikesArePlaintext(t *testing.T) {
+	secret := []byte("s3cret")
+	in := DataBagItem{
+		"id":         "x",
+		"no-version": map[string]any{"encrypted_data": "a", "iv": "b", "auth_tag": "c"},
+		"string-ver": map[string]any{"version": "3", "encrypted_data": "a", "iv": "b", "auth_tag": "c"},
+		"v4":         map[string]any{"version": 4.0, "encrypted_data": "a", "iv": "b"},
+		"v3-no-tag":  map[string]any{"version": 3.0, "encrypted_data": "a", "iv": "b"},
+		"string":     "version 3",
+	}
+	enc, err := in.Encrypt(secret)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	dec, err := enc.Decrypt(secret)
+	if err != nil || !reflect.DeepEqual(dec, in) {
+		t.Errorf("round trip = %v, %v; want %v", dec, err, in)
+	}
+}
+
+func TestDataBagItem_Encrypt_MissingIDIsValidateError(t *testing.T) {
+	if _, err := (DataBagItem{"k": "v"}).Encrypt([]byte("s")); !errors.Is(err, ErrMissingDataBagItemID) {
+		t.Errorf("err = %v, want ErrMissingDataBagItemID", err)
+	}
+}

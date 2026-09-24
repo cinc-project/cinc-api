@@ -42,6 +42,11 @@ var (
 	// ErrDataBagAuth means decryption failed authentication: a wrong
 	// secret, a tampered ciphertext, or a bad v2 HMAC.
 	ErrDataBagAuth = errors.New("cinc: data bag item failed authentication (wrong secret or tampered data)")
+	// ErrAlreadyEncrypted means Encrypt was handed an item that already
+	// holds an encrypted value. Encrypting it again would wrap the
+	// ciphertext a second time, and the stored item would then decrypt to
+	// encryption wrappers instead of the plaintext.
+	ErrAlreadyEncrypted = errors.New("cinc: data bag item is already encrypted")
 )
 
 // jsonWrapperKey is the field Chef uses to box an arbitrary value so it can be
@@ -71,13 +76,29 @@ func (i DataBagItem) IsEncrypted() bool {
 
 // Encrypt returns a new DataBagItem in which the "id" value is copied verbatim
 // (in cleartext) and every other top-level value is replaced by a version-3
-// (AES-256-GCM) encrypted wrapper. The receiver is not modified. It returns an
-// error if the item has no non-empty string "id".
+// (AES-256-GCM) encrypted wrapper. The receiver is not modified.
+//
+// It returns an ErrMissingDataBagItemID error if the item fails Validate, and
+// ErrAlreadyEncrypted if any non-"id" value is already a well-formed
+// encryption wrapper (see IsEncrypted for what counts as one). The second
+// check is deliberately wider than IsEncrypted, which needs every value to be
+// a wrapper: an encrypted item with one plaintext key added would otherwise
+// have its ciphertext encrypted again. A plaintext value cannot trip it by
+// accident, since a wrapper is a map with a numeric version of 1, 2, or 3,
+// string "encrypted_data" and "iv", and the version's "hmac" or "auth_tag".
 func (i DataBagItem) Encrypt(secret []byte) (DataBagItem, error) {
-	id := i.ID()
-	if id == "" {
-		return nil, errors.New("cinc: data bag item requires a non-empty string \"id\" to encrypt")
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
+	for k, v := range i {
+		if k == "id" {
+			continue
+		}
+		if _, err := parseWrapper(v); err == nil {
+			return nil, fmt.Errorf("%w: value %q is an encryption wrapper", ErrAlreadyEncrypted, k)
+		}
+	}
+	id := i.ID()
 	key := deriveKey(secret)
 	out := make(DataBagItem, len(i))
 	for k, v := range i {
@@ -134,6 +155,17 @@ func (i DataBagItem) Decrypt(secret []byte) (DataBagItem, error) {
 // DataBagItem.from_hash discards both before the encrypted-item reader runs.
 func isServerItemKey(k string) bool {
 	return k == serverItemKeys[0] || k == serverItemKeys[1]
+}
+
+// isServerItemValue reports whether k=v is server bookkeeping rather than
+// item data: a server-added key holding anything but an encryption wrapper.
+// It is the rule IsEncrypted and Decrypt apply, shared with Content.
+func isServerItemValue(k string, v any) bool {
+	if !isServerItemKey(k) {
+		return false
+	}
+	_, err := parseWrapper(v)
+	return err != nil
 }
 
 // wrapper is a parsed encrypted-value envelope.

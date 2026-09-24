@@ -122,6 +122,63 @@ func testDataBagEncryptedRoundTrip(t *testing.T, _ Target, c *cinc.Client) {
 	}
 }
 
+// testDataBagEncryptedEdit runs the encrypted edit flow through the server's
+// echo and storage: CreateEncrypted, then GetDecrypted, a plaintext change,
+// UpdateEncrypted, and GetDecrypted again. The item is stored encrypted
+// throughout, and re-encrypting a stored item is refused before any request.
+func testDataBagEncryptedEdit(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	items := c.DataBags.Items(newDataBag(t, c))
+	secret := []byte(randomHex(t, 32))
+	id := uniqueName(t, "item")
+	plain := cinc.DataBagItem{"id": id, "password": "hunter2"}
+
+	created, _, err := items.CreateEncrypted(ctx, plain, secret)
+	if err != nil {
+		t.Fatalf("CreateEncrypted: %v", err)
+	}
+	if !created.IsEncrypted() {
+		t.Errorf("CreateEncrypted returned %v, want the encrypted item", created)
+	}
+	current, _, err := items.GetDecrypted(ctx, id, secret)
+	if err != nil {
+		t.Fatalf("GetDecrypted: %v", err)
+	}
+	if !reflect.DeepEqual(current, plain) {
+		t.Errorf("GetDecrypted = %v, want %v", current, plain)
+	}
+
+	current["password"] = "correct horse"
+	current["port"] = 5432.0
+	if _, _, err := items.UpdateEncrypted(ctx, current, secret); err != nil {
+		t.Fatalf("UpdateEncrypted: %v", err)
+	}
+	stored, _, err := items.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !stored.IsEncrypted() {
+		t.Errorf("stored item is not encrypted: %v", stored)
+	}
+	if got := len(stored.Content()); got != 2 {
+		t.Errorf("stored item Content has %d keys, want 2: %v", got, stored.Content())
+	}
+	edited, _, err := items.GetDecrypted(ctx, id, secret)
+	if err != nil {
+		t.Fatalf("GetDecrypted after update: %v", err)
+	}
+	if !reflect.DeepEqual(edited, current) {
+		t.Errorf("GetDecrypted after update = %v, want %v", edited, current)
+	}
+
+	if _, _, err := items.GetDecrypted(ctx, id, []byte("wrong secret")); !errors.Is(err, cinc.ErrDataBagAuth) {
+		t.Errorf("GetDecrypted with the wrong secret: err = %v, want ErrDataBagAuth", err)
+	}
+	if _, _, err := items.UpdateEncrypted(ctx, stored, secret); !errors.Is(err, cinc.ErrAlreadyEncrypted) {
+		t.Errorf("UpdateEncrypted of the stored item: err = %v, want ErrAlreadyEncrypted", err)
+	}
+}
+
 // Encrypted values produced by Chef's own Ruby implementation
 // (Chef::EncryptedDataBagItem::Encryptor::Version{1,2,3}Encryptor.new(
 // "hello world", chefSecret).for_encrypted_item). The same fixtures back the
