@@ -3,7 +3,6 @@ package cinc
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
 // DataBagItem is a single data bag item. It must contain an "id" key.
@@ -13,6 +12,37 @@ type DataBagItem map[string]any
 func (i DataBagItem) ID() string {
 	s, _ := i["id"].(string)
 	return s
+}
+
+// ErrMissingDataBagItemID means a data bag item has no "id", or its "id" is
+// not a non-empty string. A Chef Server stores and indexes items by it.
+var ErrMissingDataBagItemID = errors.New("cinc: data bag item requires a non-empty string \"id\"")
+
+// Validate reports whether the item can be written to a Chef Server: it
+// returns ErrMissingDataBagItemID unless the item has a non-empty string
+// "id". Create, Update and Encrypt run the same check; call Validate to vet
+// an item (say, one a user just edited) before doing anything else with it.
+func (i DataBagItem) Validate() error {
+	if i.ID() == "" {
+		return ErrMissingDataBagItemID
+	}
+	return nil
+}
+
+// Content returns a copy of the item's own values: every key except "id"
+// and the plaintext "chef_type"/"data_bag" keys a Chef Server adds to the
+// items it echoes back or returns from search. An encrypted value under one
+// of those two names is kept, as Decrypt keeps it. Use it to show or compare
+// what an item holds without its bookkeeping.
+func (i DataBagItem) Content() map[string]any {
+	out := make(map[string]any, len(i))
+	for k, v := range i {
+		if k == "id" || isServerItemValue(k, v) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // DataBagsService accesses the /data endpoints.
@@ -63,20 +93,62 @@ func (s *DataBagItemsService) Get(ctx context.Context, id string) (DataBagItem, 
 	return do[DataBagItem](ctx, s.client, "GET", s.item(id), nil)
 }
 
-// Create adds a new item to the bag. The item must contain an "id".
+// Create adds a new item to the bag. It returns an ErrMissingDataBagItemID
+// error, without sending anything, if the item fails Validate.
 func (s *DataBagItemsService) Create(ctx context.Context, item DataBagItem) (DataBagItem, *Response, error) {
-	if item.ID() == "" {
-		return nil, nil, errors.New("cinc: data bag item requires an \"id\"")
+	if err := item.Validate(); err != nil {
+		return nil, nil, err
 	}
 	return s.write(ctx, "POST", s.coll(), item)
 }
 
-// Update replaces an existing item.
+// Update replaces an existing item. It returns an ErrMissingDataBagItemID
+// error, without sending anything, if the item fails Validate.
 func (s *DataBagItemsService) Update(ctx context.Context, item DataBagItem) (DataBagItem, *Response, error) {
-	if item.ID() == "" {
-		return nil, nil, fmt.Errorf("cinc: data bag item requires an \"id\"")
+	if err := item.Validate(); err != nil {
+		return nil, nil, err
 	}
 	return s.write(ctx, "PUT", s.item(item.ID()), item)
+}
+
+// GetDecrypted retrieves an encrypted item and decrypts it with secret (see
+// DataBagItem.Decrypt). A plaintext item yields an ErrNotEncrypted error and
+// a wrong secret an ErrDataBagAuth error; the item is nil in both cases, and
+// the Response is the GET's.
+func (s *DataBagItemsService) GetDecrypted(ctx context.Context, id string, secret []byte) (DataBagItem, *Response, error) {
+	item, resp, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, resp, err
+	}
+	plain, err := item.Decrypt(secret)
+	if err != nil {
+		return nil, resp, err
+	}
+	return plain, resp, nil
+}
+
+// CreateEncrypted encrypts a plaintext item with secret (see
+// DataBagItem.Encrypt) and adds it to the bag. The item is not modified.
+// Nothing is sent if the item fails Validate or is already encrypted
+// (ErrAlreadyEncrypted). The returned item is the server's echo, which is the
+// encrypted item as stored.
+func (s *DataBagItemsService) CreateEncrypted(ctx context.Context, item DataBagItem, secret []byte) (DataBagItem, *Response, error) {
+	enc, err := item.Encrypt(secret)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.Create(ctx, enc)
+}
+
+// UpdateEncrypted encrypts a plaintext item with secret and replaces the
+// stored item with it, like CreateEncrypted does for a new one. An edit is
+// GetDecrypted, a change to the plaintext, then UpdateEncrypted.
+func (s *DataBagItemsService) UpdateEncrypted(ctx context.Context, item DataBagItem, secret []byte) (DataBagItem, *Response, error) {
+	enc, err := item.Encrypt(secret)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.Update(ctx, enc)
 }
 
 // serverItemKeys are the keys a Chef Server adds to the item it echoes back
