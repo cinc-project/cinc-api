@@ -24,7 +24,7 @@ following endpoint families are implemented:
 
 | Service              | Path                                  | Methods                                                              |
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
-| `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission; org-level (`GetOrg`/`SetOrgPermission`) and global-user (`GetUser`/`SetUserPermission`) |
+| `c.ACLs`             | `/<object>/<name>/_acl`               | GetTarget / SetTargetPermission / Grant / Revoke on an `ACLTarget` (`ObjectACL`, `OrgACL`, `UserACL`); Get / SetPermission, GetOrg / SetOrgPermission and GetUser / SetUserPermission |
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
@@ -151,6 +151,15 @@ model, so callers don't re-encode server conventions:
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands
   to the five standard permissions — the reusable core of an ACL grant/revoke.
+- ACL targets and grant/revoke — `ObjectACL(cinc.ACLNodes, "web01")`,
+  `OrgACL()` and `UserACL("alice")` name the object whose ACL is read or
+  written; the `ACL*` constants (`ACLDataBags` is `"data"`, and so on, listed
+  in `ACLObjectTypes`) are the object types erchef serves `_acl` on.
+  `ACLs.Grant`/`Revoke(ctx, target, perm, actors, groups)` take a permission
+  or `"all"`, read the ACL once, write only the permissions that change, and
+  return those; a write that fails part way returns the permissions already
+  changed and an `*ACLChangeError` naming the one that failed. A member the
+  server cannot resolve is a 400, `ErrBadRequest`.
 
 ## License
 

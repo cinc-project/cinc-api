@@ -75,6 +75,7 @@ func run(m *testing.M) int {
 			"cookbooks/rejects-manifest-without-metadata": "accepts a manifest without metadata: https://github.com/cinc-project/cinc-server-ng/issues/160",
 			"cookbooks/rejects-all-files-under-api-v1":    "accepts all_files under API v1: https://github.com/cinc-project/cinc-server-ng/issues/160",
 			"clients/rejects-key-field-on-update":         "accepts and stores create_key on a client PUT: https://github.com/cinc-project/cinc-server-ng/issues/165",
+			"acls/revoke-keeps-admins-on-grant":           "lets a non-superuser remove admins from a grant ACE: https://github.com/cinc-project/cinc-server-ng/issues/211",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()

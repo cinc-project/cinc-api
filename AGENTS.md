@@ -91,6 +91,9 @@ file new ones at cinc-project/cinc-server-ng):
   kind. Both silently drop a name that resolves to nothing, which is why
   `Groups.AddMembers` reads the group back. The flat `actors` array on a GET
   is clients+users on erchef but every member on cinc-server-ng.
+- **cinc-server-ng** lets a non-superuser take the `admins` group off an
+  object's `grant` ACE; erchef refuses that with a 403 ("Admin group cannot
+  be removed from the Grant ACE"), not a 400.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
