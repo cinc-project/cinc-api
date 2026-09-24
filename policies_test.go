@@ -215,3 +215,69 @@ func TestCookbookLock_PinnedVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestCookbookLock_DottedIdentifier(t *testing.T) {
+	cases := []struct {
+		name string
+		lock CookbookLock
+		want string
+	}{
+		{"dotted-decimal identifier", CookbookLock{Identifier: "abc", DottedDecimalIdentifier: "1.2.3"}, "1.2.3"},
+		{"falls back to identifier", CookbookLock{Identifier: "abc"}, "abc"},
+		{"neither", CookbookLock{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.lock.DottedIdentifier(); got != tc.want {
+				t.Fatalf("DottedIdentifier() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCookbookLock_GitRef(t *testing.T) {
+	// cookbook-omnifetch's GitLocation#lock_data records "revision" (the
+	// resolved commit) and, when the Policyfile named them, "ref", "tag"
+	// and "branch".
+	cases := []struct {
+		name string
+		opts map[string]any
+		want string
+	}{
+		{"revision wins", map[string]any{"revision": "0123abc", "ref": "0123", "tag": "v1", "branch": "main"}, "0123abc"},
+		{"then ref", map[string]any{"ref": "0123", "tag": "v1", "branch": "main"}, "0123"},
+		{"then tag", map[string]any{"tag": "v1", "branch": "main"}, "v1"},
+		{"then branch", map[string]any{"branch": "main"}, "main"},
+		{"empty revision is skipped", map[string]any{"revision": "", "branch": "main"}, "main"},
+		{"non-string revision is skipped", map[string]any{"revision": 7, "branch": "main"}, "main"},
+		{"none", map[string]any{"git": "https://x/"}, ""},
+		{"nil source_options", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (CookbookLock{SourceOptions: tc.opts}).GitRef(); got != tc.want {
+				t.Fatalf("GitRef() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCookbookLock_GitSubdir(t *testing.T) {
+	cases := []struct {
+		name string
+		opts map[string]any
+		want string
+	}{
+		{"rel", map[string]any{"git": "https://x/", "rel": "cookbooks/base"}, "cookbooks/base"},
+		{"no rel", map[string]any{"git": "https://x/"}, ""},
+		{"non-string rel", map[string]any{"rel": true}, ""},
+		{"nil source_options", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (CookbookLock{SourceOptions: tc.opts}).GitSubdir(); got != tc.want {
+				t.Fatalf("GitSubdir() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

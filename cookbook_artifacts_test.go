@@ -185,3 +185,16 @@ func TestCookbookArtifacts_UploadRoundTrip(t *testing.T) {
 		t.Errorf("manifest missing chef_type cookbook_artifact_version: %s", body)
 	}
 }
+
+func TestCookbookArtifactListEntry_Has(t *testing.T) {
+	e := CookbookArtifactListEntry{Versions: []CookbookArtifactVersion{{Identifier: "aaa"}, {Identifier: "bbb"}}}
+	if !e.Has("bbb") {
+		t.Error("Has(bbb) = false, want true")
+	}
+	if e.Has("ccc") {
+		t.Error("Has(ccc) = true, want false")
+	}
+	if (CookbookArtifactListEntry{}).Has("aaa") {
+		t.Error("zero entry Has(aaa) = true, want false")
+	}
+}

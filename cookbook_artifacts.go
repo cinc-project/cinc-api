@@ -17,8 +17,10 @@ type CookbookArtifactListEntry struct {
 	Versions []CookbookArtifactVersion `json:"versions"`
 }
 
-// has reports whether identifier is among the entry's versions.
-func (e CookbookArtifactListEntry) has(identifier string) bool {
+// Has reports whether identifier is among the entry's versions. Paired with
+// CookbookArtifacts.List it tells whether the server already holds an artifact
+// a Policyfile lock pins.
+func (e CookbookArtifactListEntry) Has(identifier string) bool {
 	for _, v := range e.Versions {
 		if v.Identifier == identifier {
 			return true
