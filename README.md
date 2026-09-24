@@ -32,7 +32,7 @@ following endpoint families are implemented:
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
-| `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete                                |
+| `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete / AddMembers / RemoveMembers   |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
 | `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Modify / Delete                       |
@@ -135,6 +135,18 @@ model, so callers don't re-encode server conventions:
   `Chef::DataBagItem` envelope a full data bag search wraps each item in, and
   any other row unchanged. `WithPartialPaths("kernel.release", ...)` builds a
   partial search from dotted paths, keyed by the path itself.
+- `Groups.AddMembers(group, kind, names...)` / `RemoveMembers(...)` — change
+  one kind of member (`MemberUser`, `MemberClient`, `MemberGroup`;
+  `ParseMemberKind` reads `"user"`/`"users"` and so on) with a read, a PUT
+  that is skipped when nothing changes, and a read-back. The returned
+  `MemberChange` splits the names into `Changed`, `Unchanged` (already as
+  asked) and `Dropped`: the server accepts a group PUT naming an actor that
+  does not exist and silently leaves it out, so a successful PUT alone does
+  not mean the member was added.
+- `Group` decodes both of the server's shapes: members in top-level
+  `users`/`clients`/`groups` arrays (GET) or nested under an `actors` object
+  (the PUT body, which erchef echoes back). The flat `actors` array a GET also
+  carries is ignored, since the typed lists already hold its names.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
   permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
   groups (reporting whether anything changed), and `ExpandPerm("all")` expands

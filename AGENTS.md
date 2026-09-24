@@ -84,6 +84,13 @@ file new ones at cinc-project/cinc-server-ng):
   third with a 400 (`metadata.version` must equal the URL version;
   `all_files` is only valid from API version 2, which is why the manifest
   PUT asks for 2), and chef-client misfiles every entry under the second.
+- **Group PUT** differs too. erchef answers with the request body echoed
+  (members nested under `actors`, unresolvable names still in it) and keeps
+  any `actors` kind the body omits; cinc-server-ng answers with the stored
+  GET-shaped group (unknown names already dropped) and clears an omitted
+  kind. Both silently drop a name that resolves to nothing, which is why
+  `Groups.AddMembers` reads the group back. The flat `actors` array on a GET
+  is clients+users on erchef but every member on cinc-server-ng.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
@@ -140,7 +147,9 @@ down.
 ## Encoding edge cases worth remembering
 
 - `Group.Update` rewraps `Users/Clients/Groups` into the server's
-  required `actors: {users, clients, groups}` shape.
+  required `actors: {users, clients, groups}` shape, and
+  `Group.UnmarshalJSON` reads that shape back (an `actors` object), so a
+  PUT-shaped group file does not decode to an empty group.
 - Any slice Chef validates as an array must serialize as `[]`, not
   `null`: `groups.go:nonNil`, `run_list` in `Node`/`Role.MarshalJSON`,
   and `normal.tags` in `SetTags`.
