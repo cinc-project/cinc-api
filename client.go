@@ -53,6 +53,7 @@ type Client struct {
 	Principals        *PrincipalsService
 	Universe          *UniverseService
 	Stats             *StatsService
+	PushJobs          *PushJobsService
 }
 
 // NewClient builds a Client from cfg and optional Options.
@@ -115,6 +116,7 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	c.Principals = &PrincipalsService{client: c}
 	c.Universe = &UniverseService{client: c}
 	c.Stats = &StatsService{client: c}
+	c.PushJobs = &PushJobsService{client: c}
 	return c, nil
 }
 
