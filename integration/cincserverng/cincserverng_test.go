@@ -69,7 +69,6 @@ func run(m *testing.M) int {
 		StatsUser:     "statsuser",
 		StatsPassword: "unused",
 		Gaps: map[string]string{
-			"acls/org":       "serves the org ACL at /organizations/O/_acl, not erchef's route: https://github.com/cinc-project/cinc-server-ng/issues/161",
 			"principals/get": "returns the API v0 single-object shape under v1: https://github.com/cinc-project/cinc-server-ng/issues/162",
 			"keys/rename":    "key PUT ignores a new name and drops omitted fields: https://github.com/cinc-project/cinc-server-ng/issues/163",
 			"stats/get":      "requires a signed request instead of HTTP Basic auth: https://github.com/cinc-project/cinc-server-ng/issues/164",
