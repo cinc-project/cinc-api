@@ -381,22 +381,36 @@ var chefVersionRe = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?$`)
 // chefVersion normalizes a cookbook version the way Chef::Version#to_s does:
 // "1.2" becomes "1.2.0" and leading zeros are dropped.
 func chefVersion(s string) (string, error) {
-	m := chefVersionRe.FindStringSubmatch(s)
-	if m == nil {
-		return "", fmt.Errorf("version %q does not match 'x.y.z' or 'x.y'", s)
+	v, err := parseChefVersion(s)
+	if err != nil {
+		return "", err
 	}
 	parts := make([]string, 3)
-	for i, p := range m[1:] {
-		if p == "" {
-			p = "0"
-		}
-		n, err := strconv.ParseUint(p, 10, 63)
-		if err != nil {
-			return "", fmt.Errorf("version %q: %w", s, err)
-		}
+	for i, n := range v {
 		parts[i] = strconv.FormatUint(n, 10)
 	}
 	return strings.Join(parts, "."), nil
+}
+
+// parseChefVersion parses a cookbook version into its major, minor and patch
+// numbers, a missing patch being zero.
+func parseChefVersion(s string) ([3]uint64, error) {
+	var v [3]uint64
+	m := chefVersionRe.FindStringSubmatch(s)
+	if m == nil {
+		return v, fmt.Errorf("version %q does not match 'x.y.z' or 'x.y'", s)
+	}
+	for i, p := range m[1:] {
+		if p == "" {
+			continue
+		}
+		n, err := strconv.ParseUint(p, 10, 63)
+		if err != nil {
+			return v, fmt.Errorf("version %q: %w", s, err)
+		}
+		v[i] = n
+	}
+	return v, nil
 }
 
 // chefConstraintRe is Chef::VersionConstraint::PATTERN.

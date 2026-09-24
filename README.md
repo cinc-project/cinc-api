@@ -28,7 +28,7 @@ following endpoint families are implemented:
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
-| `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
+| `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
@@ -95,6 +95,14 @@ model, so callers don't re-encode server conventions:
   the new private key (creating one if the client has none).
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
   `Policyfile.lock.json` into a `PolicyRevision`.
+- `CompareCookbookVersions(a, b)` orders cookbook versions the way Chef does
+  (numeric `x.y[.z]`, so `10.0.0` is newer than `9.0.0`); anything that is not
+  a valid version sorts below every valid one. Every version list the client
+  returns (`Cookbooks.List`/`ListVersions`/`GetVersions`,
+  `Environments.ListCookbooks`/`GetCookbook`) is sorted newest-first with it
+  and trimmed to `num_versions`, whatever the server sent, and an invalid
+  `num_versions` is rejected before a request is made. `LatestVersion` is the
+  `_latest` version alias.
 - `CookbookLock` accessors — `Origin()` (classify a lock's `source_options` as
   `path`/`artifactserver`/`git`/`chef_server` and return its location) and
   `PinnedVersion()` (the `source_options` version, falling back to the lock's
