@@ -3,6 +3,7 @@ package cinc
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -67,8 +68,9 @@ type CookbookMetadata struct {
 	OhaiVersions [][]string `json:"ohai_versions,omitempty"`
 	Gems         [][]string `json:"gems,omitempty"`
 
-	// EagerLoadLibraries is true, false, or a glob string/list naming the
+	// EagerLoadLibraries is true, false, or a glob string or list naming the
 	// libraries chef-client loads eagerly; nil leaves Chef's default (true).
+	// ParseMetadataRb stores a list as []string, JSON decoding as []any.
 	EagerLoadLibraries any `json:"eager_load_libraries,omitempty"`
 }
 
@@ -509,24 +511,34 @@ func manifestFileName(rel string) (name, specificity string) {
 //     path; any other symlink, and any special file, is skipped (see
 //     cookbookSymlinkTarget).
 //
-// Metadata comes from metadata.json when present (complete, as compiled by
-// knife or Berkshelf), and otherwise from a static parse of metadata.rb that
-// recognizes only literal calls — see parseMetadataRb for exactly which.
-// Supply a metadata.json, or amend Metadata on the result, for anything
-// computed in Ruby.
+// Metadata comes from LoadCookbookMetadata: metadata.json when present
+// (complete, as compiled by knife or Berkshelf), and otherwise a static parse
+// of metadata.rb that recognizes only literal calls — see ParseMetadataRb for
+// exactly which. Supply a metadata.json, or amend Metadata on the result, for
+// anything computed in Ruby.
 //
 // The cookbook name is the metadata's name, falling back to the base name of
 // dir. version is the version to upload as; when empty the metadata's version
 // is used, and failing that Chef's default of "0.0.0". A version that differs
 // from the one the metadata declares is an error, since the server would
-// reject the mismatch. Every remaining regular file is checksummed as it is
+// reject the mismatch, and so, when version is empty, is a metadata.rb that
+// computes its version (ErrMetadataVersionNotLiteral), which would otherwise
+// upload as 0.0.0. Every remaining regular file is checksummed as it is
 // read; its content is not kept, but streamed from disk again by the upload.
 // An empty directory is an error.
 func LocalCookbookFromDir(dir, version string) (*LocalCookbook, error) {
-	md, err := loadCookbookMetadata(dir)
-	if err != nil {
-		return nil, fmt.Errorf("cinc: read cookbook metadata: %w", err)
+	loaded, err := LoadCookbookMetadata(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		loaded, err = &CookbookMetadata{}, nil
+	case errors.Is(err, ErrMetadataVersionNotLiteral) && version != "":
+		// The caller has said which version this is.
+		err = nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	md := *loaded
 	if md.Name == "" {
 		md.Name = filepath.Base(dir)
 	}

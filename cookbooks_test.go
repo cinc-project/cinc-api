@@ -594,6 +594,9 @@ func TestLocalCookbookFromDir_Version(t *testing.T) {
 		// Chef::Cookbook::Metadata defaults version to 0.0.0.
 		{"neither", "name 'x'\n", "", "0.0.0", ""},
 		{"disagree", "name 'x'\nversion '2.1.0'\n", "3.0.0", "", `version "3.0.0" does not match metadata version "2.1.0"`},
+		// A computed version would otherwise upload as 0.0.0.
+		{"computed", "name 'x'\nversion IO.read('VERSION')\n", "", "", "version is not a string literal"},
+		{"computed, argument given", "name 'x'\nversion IO.read('VERSION')\n", "1.0.0", "1.0.0", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {

@@ -13,38 +13,58 @@ import (
 	"strings"
 )
 
-// loadCookbookMetadata reads dir's cookbook metadata. Like Chef's cookbook
-// loader, metadata.json takes precedence over metadata.rb; with neither, the
-// zero value is returned.
-func loadCookbookMetadata(dir string) (CookbookMetadata, error) {
+// ErrMetadataVersionNotLiteral reports a metadata.rb whose version is set by
+// something other than a string literal (a method call, interpolation, a
+// conditional). Its value can only be known by running the Ruby, which this
+// package never does. ParseMetadataRb returns it, wrapped with the line,
+// alongside the rest of the metadata, whose Version is left empty; without
+// the check the cookbook would silently take Chef's default of 0.0.0.
+var ErrMetadataVersionNotLiteral = errors.New("version is not a string literal, so it can't be read without running Ruby")
+
+// LoadCookbookMetadata reads the cookbook metadata in dir. Like Chef's
+// CookbookVersionLoader, metadata.json takes precedence over metadata.rb; see
+// ParseMetadataJSON and ParseMetadataRb. With neither file the error wraps
+// fs.ErrNotExist. As ParseMetadataRb does, it returns the metadata together
+// with an error wrapping ErrMetadataVersionNotLiteral when metadata.rb
+// computes its version.
+//
+// Values are returned as the file sets them: nothing is defaulted, so an
+// unset Name or Version is empty (see CompiledJSON for Chef's defaults).
+func LoadCookbookMetadata(dir string) (*CookbookMetadata, error) {
 	for _, f := range []struct {
 		name  string
-		parse func([]byte) (CookbookMetadata, error)
+		parse func([]byte, string) (*CookbookMetadata, error)
 	}{{"metadata.json", parseMetadataJSON}, {"metadata.rb", parseMetadataRb}} {
-		data, err := os.ReadFile(filepath.Join(dir, f.name))
+		path := filepath.Join(dir, f.name)
+		data, err := os.ReadFile(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return CookbookMetadata{}, err
+			return nil, fmt.Errorf("cinc: read cookbook metadata: %w", err)
 		}
-		return f.parse(data)
+		return f.parse(data, path)
 	}
-	return CookbookMetadata{}, nil
+	return nil, fmt.Errorf("cinc: no metadata.json or metadata.rb in %s: %w", dir, fs.ErrNotExist)
 }
 
-// parseMetadataJSON decodes a compiled metadata.json. Its dependencies are
+// ParseMetadataJSON decodes a compiled metadata.json. Its dependencies are
 // read the way Chef's Metadata#from_hash does (handle_incorrect_constraints):
-// a legacy one-element constraint array is unwrapped. Chef turns an empty or
-// multi-element array into [], which the server rejects, so that is an error
-// here.
-func parseMetadataJSON(data []byte) (CookbookMetadata, error) {
+// a legacy one-element constraint array ({"apt": [">= 1.0"]}) is unwrapped.
+// Chef turns an empty or multi-element array into [], which the server
+// rejects, so that is an error here. Every other value is kept as written,
+// as from_hash keeps it.
+func ParseMetadataJSON(data []byte) (*CookbookMetadata, error) {
+	return parseMetadataJSON(data, "metadata.json")
+}
+
+func parseMetadataJSON(data []byte, file string) (*CookbookMetadata, error) {
 	var raw struct {
 		CookbookMetadata
 		Dependencies map[string]any `json:"dependencies"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return CookbookMetadata{}, fmt.Errorf("metadata.json: %w", err)
+		return nil, fmt.Errorf("cinc: parse %s: %w", file, err)
 	}
 	md := raw.CookbookMetadata
 	if raw.Dependencies != nil {
@@ -56,54 +76,83 @@ func parseMetadataJSON(data []byte) (CookbookMetadata, error) {
 		}
 		s, ok := v.(string)
 		if !ok {
-			return CookbookMetadata{}, fmt.Errorf("metadata.json: dependency %q: want one version constraint, got %v", name, v)
+			return nil, fmt.Errorf("cinc: parse %s: dependency %q: want one version constraint, got %v", file, name, v)
 		}
 		md.Dependencies[name] = s
 	}
-	return md, nil
+	return &md, nil
 }
 
 // metadataRbCall matches the start of a metadata.rb method call: the method
 // name, then either "(" or whitespace before the arguments.
 var metadataRbCall = regexp.MustCompile(`^[ \t]*([a-z_]+)(?:[ \t]*\(|[ \t]+)`)
 
-// parseMetadataRb statically extracts metadata from a metadata.rb. It is Ruby
+// metadataRbAssignment matches a local variable assignment ("version = x"),
+// which Ruby does not read as a call.
+var metadataRbAssignment = regexp.MustCompile(`^[ \t]*[a-z_]+[ \t]*=[^=~]`)
+
+// ParseMetadataRb statically extracts metadata from a metadata.rb. It is Ruby
 // and is never evaluated, so only calls whose arguments are all literals are
-// recognized:
+// recognized, with the arguments Chef::Cookbook::Metadata's DSL accepts:
 //
-//	name, version, description, long_description, maintainer,
+//	name, description, long_description, maintainer,
 //	maintainer_email, license, source_url, issues_url   'string'
-//	depends, supports                                     'name'[, 'constraint']
-//	chef_version, ohai_version                            'constraint'[, ...]
-//	privacy                                               true | false
+//	version                                             'x.y.z' | 'x.y'
+//	depends, supports, provides                         'name'[, 'constraint']
+//	chef_version, ohai_version                          'requirement'[, ...]
+//	gem                                                 'name'[, 'requirement', ...]
+//	recipe                                              'name', 'description'
+//	privacy                                             true | false
+//	eager_load_libraries                                true | false | 'glob' | ['glob', ...]
 //
 // Arguments may be parenthesized; strings may be single-quoted, or
 // double-quoted without interpolation or escapes other than \" and \\; a
 // symbol (:apt, :"apt") reads as its name; a # comment may end any line.
-// A call may continue onto following lines after a trailing comma or an
-// open parenthesis, as Ruby reads it (see metadataRbStatements). Any other
-// statement — a computed value, interpolation, a conditional, another
-// method — is skipped, so metadata.json is the way to supply metadata this
-// cannot see.
+// A call may continue onto following lines after a trailing comma or an open
+// parenthesis or bracket, as Ruby reads it (see metadataRbStatements).
 //
-// Recognized values are normalized as Chef::Cookbook::Metadata stores them,
-// and values Chef would reject (a malformed version or constraint, a cookbook
-// depending on itself) are errors.
-func parseMetadataRb(data []byte) (CookbookMetadata, error) {
+// A statement whose arguments are not all literals (a computed value,
+// interpolation, a trailing conditional) is skipped, as is any other method,
+// which Chef's method_missing ignores too; metadata.json is the way to supply
+// metadata this cannot see. The one exception is version: a version that is
+// set but cannot be read returns the metadata parsed, with Version empty,
+// and an error wrapping ErrMetadataVersionNotLiteral, since treating it as
+// unset would publish the cookbook as 0.0.0. A later literal version call
+// replaces a computed one, as it would in Ruby.
+//
+// Recognized values are normalized as Chef::Cookbook::Metadata stores them
+// (version "1.2" is "1.2.0", constraint "1.2" is "= 1.2", requirement "16" is
+// "= 16"), and a call Chef would raise on is an error: a malformed version or
+// constraint, more than one constraint, a literal argument of the wrong type
+// or number, or depends naming the cookbook itself (compared, as Chef does,
+// with the name declared so far).
+func ParseMetadataRb(data []byte) (*CookbookMetadata, error) {
+	return parseMetadataRb(data, "metadata.rb")
+}
+
+func parseMetadataRb(data []byte, file string) (*CookbookMetadata, error) {
 	var md CookbookMetadata
+	computed := 0 // the line of a version call that could not be read
 	for _, st := range metadataRbStatements(string(data)) {
 		method, args, ok := parseRubyCall(st.text)
 		if !ok {
+			if m := metadataRbCall.FindStringSubmatch(st.text); m != nil && m[1] == "version" &&
+				!metadataRbAssignment.MatchString(st.text) {
+				computed, md.Version = st.line, ""
+			}
 			continue
 		}
 		if err := md.applyRb(method, args); err != nil {
-			return CookbookMetadata{}, fmt.Errorf("metadata.rb:%d: %s: %w", st.line, method, err)
+			return nil, fmt.Errorf("cinc: parse %s: line %d: %s: %w", file, st.line, method, err)
+		}
+		if method == "version" {
+			computed = 0
 		}
 	}
-	if _, ok := md.Dependencies[md.Name]; ok && md.Name != "" {
-		return CookbookMetadata{}, fmt.Errorf("metadata.rb: cookbook %q depends on itself", md.Name)
+	if computed != 0 {
+		return &md, fmt.Errorf("cinc: parse %s: line %d: %w", file, computed, ErrMetadataVersionNotLiteral)
 	}
-	return md, nil
+	return &md, nil
 }
 
 // metadataRbStatement is one statement of a metadata.rb, with any comments
@@ -114,11 +163,11 @@ type metadataRbStatement struct {
 }
 
 // metadataRbStatements splits src into statements. A line continues onto
-// the next when, ignoring its comment, it ends in "," or "(", or when a
-// parenthesis it opened is still open and the next line starts with ")".
-// A line that itself starts a call is never taken as a continuation, so a
-// stray trailing comma or an unclosed parenthesis costs only its own
-// statement, never the next call.
+// the next when, ignoring its comment, it ends in ",", "(" or "[", or when a
+// parenthesis or bracket it opened is still open and the next line starts
+// with ")" or "]". A line that itself starts a call is never taken as a
+// continuation, so a stray trailing comma or an unclosed parenthesis costs
+// only its own statement, never the next call.
 func metadataRbStatements(src string) []metadataRbStatement {
 	lines := strings.Split(src, "\n")
 	var out []metadataRbStatement
@@ -128,8 +177,9 @@ func metadataRbStatements(src string) []metadataRbStatement {
 		for i+1 < len(lines) && !metadataRbCall.MatchString(lines[i+1]) {
 			text = strings.TrimRight(text, " \t\r")
 			next := strings.TrimLeft(lines[i+1], " \t")
-			if !strings.HasSuffix(text, ",") && !strings.HasSuffix(text, "(") &&
-				(depth <= 0 || !strings.HasPrefix(next, ")")) {
+			open := strings.HasSuffix(text, ",") || strings.HasSuffix(text, "(") || strings.HasSuffix(text, "[")
+			closing := depth > 0 && (strings.HasPrefix(next, ")") || strings.HasPrefix(next, "]"))
+			if !open && !closing {
 				break
 			}
 			i++
@@ -144,8 +194,9 @@ func metadataRbStatements(src string) []metadataRbStatement {
 }
 
 // rubyCode returns line without its trailing # comment, and how many more
-// parentheses it opens than closes, both ignoring anything inside a quoted
-// string. An unterminated string leaves the rest of the line as code.
+// parentheses and brackets it opens than closes, both ignoring anything
+// inside a quoted string. An unterminated string leaves the rest of the line
+// as code.
 func rubyCode(line string) (code string, depth int) {
 	var quote byte
 	for i := 0; i < len(line); i++ {
@@ -161,52 +212,80 @@ func rubyCode(line string) (code string, depth int) {
 			quote = c
 		case c == '#':
 			return line[:i], depth
-		case c == '(':
+		case c == '(' || c == '[':
 			depth++
-		case c == ')':
+		case c == ')' || c == ']':
 			depth--
 		}
 	}
 	return line, depth
 }
 
-// rubyArg is one literal argument: a string, or the bare word true/false.
+// rubyArgKind is the type of a literal metadata.rb argument.
+type rubyArgKind int
+
+const (
+	rubyString rubyArgKind = iota // a string or symbol
+	rubyBool                      // true or false
+	rubyList                      // an array of strings or symbols
+)
+
+// rubyArg is one literal argument.
 type rubyArg struct {
-	s    string
-	bare bool
+	kind rubyArgKind
+	s    string   // rubyString
+	b    bool     // rubyBool
+	list []string // rubyList
 }
 
-// applyRb records one recognized metadata.rb call. Calls with an argument
-// shape Chef's DSL would not accept for that method are ignored.
+// applyRb records one recognized metadata.rb call, enforcing the argument
+// types and counts Chef::Cookbook::Metadata's DSL does. Methods it does not
+// know are ignored, as Chef's method_missing ignores them.
 func (md *CookbookMetadata) applyRb(method string, args []rubyArg) error {
-	strs := make([]string, 0, len(args))
-	for _, a := range args {
-		if a.bare {
-			if method == "privacy" && len(args) == 1 {
-				md.Privacy = a.s == "true"
-			}
-			return nil
-		}
-		strs = append(strs, a.s)
-	}
-	// parseRubyCall yields at least one argument, so strs is non-empty.
 	if field := md.stringField(method); field != nil {
-		if len(strs) == 1 {
-			*field = strs[0]
+		s, err := oneString(args)
+		if err != nil {
+			return err
 		}
+		*field = s
 		return nil
 	}
 	switch method {
 	case "version":
-		if len(strs) != 1 {
-			return nil
+		s, err := oneString(args)
+		if err != nil {
+			return err
 		}
-		v, err := chefVersion(strs[0])
+		v, err := chefVersion(s)
 		if err != nil {
 			return err
 		}
 		md.Version = v
-	case "depends", "supports":
+	case "privacy":
+		if len(args) != 1 || args[0].kind != rubyBool {
+			return errors.New("want true or false")
+		}
+		md.Privacy = args[0].b
+	case "eager_load_libraries":
+		if len(args) != 1 {
+			return errors.New("want one argument")
+		}
+		switch a := args[0]; a.kind {
+		case rubyBool:
+			md.EagerLoadLibraries = a.b
+		case rubyString:
+			md.EagerLoadLibraries = a.s
+		default:
+			md.EagerLoadLibraries = a.list
+		}
+	case "depends", "supports", "provides":
+		strs, err := stringArgs(args)
+		if err != nil {
+			return err
+		}
+		if method == "depends" && md.Name != "" && strs[0] == md.Name {
+			return fmt.Errorf("cookbook %q depends on itself", md.Name)
+		}
 		// Chef's new_args_format: one optional constraint, default ">= 0.0.0".
 		constraint := ">= 0.0.0"
 		switch len(strs) {
@@ -221,30 +300,74 @@ func (md *CookbookMetadata) applyRb(method string, args []rubyArg) error {
 			return fmt.Errorf("%q: only one version constraint is allowed", strs[0])
 		}
 		m := &md.Dependencies
-		if method == "supports" {
+		switch method {
+		case "supports":
 			m = &md.Platforms
+		case "provides":
+			m = &md.Providing
 		}
 		if *m == nil {
 			*m = map[string]string{}
 		}
 		(*m)[strs[0]] = constraint
 	case "chef_version", "ohai_version":
-		reqs := make([]string, len(strs))
-		for i, s := range strs {
-			r, err := gemRequirement(s)
-			if err != nil {
-				return err
-			}
-			reqs[i] = r
+		strs, err := stringArgs(args)
+		if err != nil {
+			return err
 		}
-		slices.Sort(reqs) // gem_requirements_to_array sorts each list
+		reqs, err := gemRequirements(strs)
+		if err != nil {
+			return err
+		}
 		if method == "chef_version" {
 			md.ChefVersions = append(md.ChefVersions, reqs)
 		} else {
 			md.OhaiVersions = append(md.OhaiVersions, reqs)
 		}
+	case "gem":
+		// Chef keeps gem's arguments as given; chef-client hands them to
+		// bundler.
+		strs, err := stringArgs(args)
+		if err != nil {
+			return err
+		}
+		md.Gems = append(md.Gems, strs)
+	case "recipe":
+		strs, err := stringArgs(args)
+		if err != nil {
+			return err
+		}
+		if len(strs) != 2 {
+			return errors.New("want a recipe name and a description")
+		}
+		if md.Recipes == nil {
+			md.Recipes = map[string]string{}
+		}
+		md.Recipes[strs[0]] = strs[1]
 	}
 	return nil
+}
+
+// oneString returns the single string argument of a call such as name or
+// version, which Chef's set_or_return validates as kind_of String.
+func oneString(args []rubyArg) (string, error) {
+	if len(args) != 1 || args[0].kind != rubyString {
+		return "", errors.New("want one string argument")
+	}
+	return args[0].s, nil
+}
+
+// stringArgs returns the arguments of a call that takes only strings.
+// parseRubyCall yields at least one argument, so the result is non-empty.
+func stringArgs(args []rubyArg) ([]string, error) {
+	strs := make([]string, len(args))
+	for i, a := range args {
+		if a.kind != rubyString {
+			return nil, errors.New("want string arguments")
+		}
+		strs[i] = a.s
+	}
+	return strs, nil
 }
 
 // stringField returns the plain string field a metadata.rb method sets, or nil.
@@ -270,8 +393,9 @@ func (md *CookbookMetadata) stringField(method string) *string {
 	return nil
 }
 
-// parseRubyCall parses a line holding a single method call whose arguments
-// are all literals (see parseMetadataRb). ok is false for anything else.
+// parseRubyCall parses a statement holding a single method call whose
+// arguments are all literals (see ParseMetadataRb). ok is false for anything
+// else.
 func parseRubyCall(line string) (method string, args []rubyArg, ok bool) {
 	m := metadataRbCall.FindStringSubmatchIndex(line)
 	if m == nil {
@@ -307,16 +431,25 @@ func parseRubyCall(line string) (method string, args []rubyArg, ok bool) {
 }
 
 // parseRubyLiteral reads one literal from the start of s: a single- or
-// double-quoted string, or the bare word true/false.
+// double-quoted string, a symbol, the bare word true/false, or an array of
+// strings and symbols.
 func parseRubyLiteral(s string) (arg rubyArg, rest string, ok bool) {
 	for _, word := range []string{"true", "false"} {
 		if after, found := strings.CutPrefix(s, word); found && !startsIdent(after) {
-			return rubyArg{s: word, bare: true}, after, true
+			return rubyArg{kind: rubyBool, b: word == "true"}, after, true
 		}
 	}
 	if strings.HasPrefix(s, ":") {
 		return parseRubySymbol(s[1:])
 	}
+	if strings.HasPrefix(s, "[") {
+		return parseRubyList(s[1:])
+	}
+	return parseRubyString(s)
+}
+
+// parseRubyString reads a single- or double-quoted string from the start of s.
+func parseRubyString(s string) (arg rubyArg, rest string, ok bool) {
 	if s == "" || (s[0] != '\'' && s[0] != '"') {
 		return rubyArg{}, "", false
 	}
@@ -348,12 +481,35 @@ func parseRubyLiteral(s string) (arg rubyArg, rest string, ok bool) {
 	return rubyArg{}, "", false // unterminated
 }
 
+// parseRubyList reads an array of strings and symbols from s, the text after
+// its "[". A trailing comma before the "]" is allowed, as in Ruby.
+func parseRubyList(s string) (arg rubyArg, rest string, ok bool) {
+	list := []string{}
+	for {
+		s = strings.TrimLeft(s, " \t")
+		if after, found := strings.CutPrefix(s, "]"); found {
+			return rubyArg{kind: rubyList, list: list}, after, true
+		}
+		elem, tail, ok := parseRubyLiteral(s)
+		if !ok || elem.kind != rubyString {
+			return rubyArg{}, "", false
+		}
+		list = append(list, elem.s)
+		s = strings.TrimLeft(tail, " \t")
+		if after, found := strings.CutPrefix(s, ","); found {
+			s = after
+		} else if !strings.HasPrefix(s, "]") {
+			return rubyArg{}, "", false
+		}
+	}
+}
+
 // parseRubySymbol reads a symbol's name from s, the text after its ":":
 // a quoted string (:"build-essential") or an identifier (:apt). Chef keys
 // the value by the symbol, which serializes as its name.
 func parseRubySymbol(s string) (arg rubyArg, rest string, ok bool) {
 	if s != "" && (s[0] == '\'' || s[0] == '"') {
-		return parseRubyLiteral(s)
+		return parseRubyString(s)
 	}
 	n := 0
 	for n < len(s) && startsIdent(s[n:]) {
@@ -416,9 +572,15 @@ func parseChefVersion(s string) ([3]uint64, error) {
 // chefConstraintRe is Chef::VersionConstraint::PATTERN.
 var chefConstraintRe = regexp.MustCompile(`^(<=|>=|~>|<|>|=) *([0-9].*)$`)
 
-// chefConstraint normalizes a cookbook version constraint the way
+// platformVersionRe is Chef::Version::Platform's accepted syntax: x.y.z, x.y,
+// x, or FreeBSD's x.y-RELEASE[-pN] (whose "." Chef leaves unescaped).
+var platformVersionRe = regexp.MustCompile(`^\d+(?:\.\d+(?:\.\d+)?)?$|(?i)^\d+.\d+-[a-z]+\d?(?:-p\d+)?$`)
+
+// chefConstraint normalizes a depends/supports/provides constraint the way
 // Chef::VersionConstraint#to_s does: "OP VERSION", with a lone version
-// meaning "= VERSION". The version itself must be a valid Chef::Version.
+// meaning "= VERSION" and the version kept as written. Chef's metadata
+// validates every such constraint as a Chef::VersionConstraint::Platform, so
+// the version must be a valid Chef::Version::Platform.
 func chefConstraint(s string) (string, error) {
 	op, v := "=", s
 	if strings.Contains(s, " ") || s == "" || s[0] < '0' || s[0] > '9' {
@@ -428,7 +590,7 @@ func chefConstraint(s string) (string, error) {
 		}
 		op, v = m[1], m[2]
 	}
-	if !chefVersionRe.MatchString(v) {
+	if !platformVersionRe.MatchString(v) {
 		return "", fmt.Errorf("invalid version constraint %q", s)
 	}
 	return op + " " + v, nil
@@ -438,16 +600,26 @@ func chefConstraint(s string) (string, error) {
 // the version to be anything that starts with a digit (as Gem::Version does).
 var gemRequirementRe = regexp.MustCompile(`^\s*(=|!=|>=|<=|>|<|~>)?\s*([0-9][0-9A-Za-z.\-]*)\s*$`)
 
-// gemRequirement normalizes one chef_version/ohai_version requirement to
-// Gem::Requirement's "OP VERSION" form, defaulting the operator to "=".
-func gemRequirement(s string) (string, error) {
-	m := gemRequirementRe.FindStringSubmatch(s)
-	if m == nil {
-		return "", fmt.Errorf("invalid requirement %q", s)
+// gemRequirements normalizes one chef_version/ohai_version call's arguments
+// as Chef's gem_requirements_to_array serializes the Gem::Dependency it
+// builds: repeated arguments dropped (Gem::Requirement#initialize), each in
+// "OP VERSION" form with the operator defaulting to "=", then sorted.
+func gemRequirements(args []string) ([]string, error) {
+	reqs := make([]string, 0, len(args))
+	for i, s := range args {
+		if slices.Contains(args[:i], s) {
+			continue
+		}
+		m := gemRequirementRe.FindStringSubmatch(s)
+		if m == nil {
+			return nil, fmt.Errorf("invalid requirement %q", s)
+		}
+		op := m[1]
+		if op == "" {
+			op = "="
+		}
+		reqs = append(reqs, op+" "+m[2])
 	}
-	op := m[1]
-	if op == "" {
-		op = "="
-	}
-	return op + " " + m[2], nil
+	slices.Sort(reqs)
+	return reqs, nil
 }

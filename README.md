@@ -139,18 +139,28 @@ model, so callers don't re-encode server conventions:
   a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
   skips dot-directories at the cookbook root and takes the cookbook name from
   `metadata.json` / `metadata.rb` rather than the directory name.
+- `LoadCookbookMetadata(dir)` / `ParseMetadataJSON(data)` /
+  `ParseMetadataRb(data)` — read a cookbook's metadata into a
+  `CookbookMetadata`, preferring `metadata.json` over `metadata.rb` as Chef's
+  loader does. `metadata.rb` is Ruby and is never evaluated: only calls whose
+  arguments are all literals are read (`name`, `version`, `description`,
+  `long_description`, `maintainer`, `maintainer_email`, `license`,
+  `source_url`, `issues_url`, `depends`, `supports`, `provides`,
+  `chef_version`, `ohai_version`, `gem`, `recipe`, `privacy`,
+  `eager_load_libraries`), normalized as `Chef::Cookbook::Metadata` stores
+  them (`version '1.2'` is `1.2.0`, `depends 'apt', '1.2'` is `= 1.2`), and a
+  call Chef would raise on (a bad constraint, a self-dependency, a wrong
+  argument type) is an error. Other calls are skipped, except a computed
+  `version`, which returns `ErrMetadataVersionNotLiteral` alongside the rest
+  of the metadata rather than silently becoming 0.0.0.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,
   dependencies, platforms, chef/ohai versions, …) is sent as the manifest's
   `metadata` block, which Chef Server requires and chef-client reads. It is
-  filled from `metadata.json` when present, otherwise from the literal calls
-  in `metadata.rb` (`name`, `version`, `description`, `long_description`,
-  `maintainer`, `maintainer_email`, `license`, `source_url`, `issues_url`,
-  `depends`, `supports`, `chef_version`, `ohai_version`, `privacy`, each on
-  one line with string literal arguments); metadata.rb is Ruby and is never
-  evaluated, so anything computed there needs a `metadata.json` or an edit to
-  `Metadata`. An empty `version` uses the metadata's version; one that
+  filled by `LoadCookbookMetadata`, so anything computed in `metadata.rb`
+  needs a `metadata.json` or an edit to `Metadata`. An empty `version` uses
+  the metadata's version (an error if `metadata.rb` computes it); one that
   disagrees with it is an error.
 - `UnwrapSearchRow(row)` — the object a search row describes: the `data` of
   a partial-search row (`{"url", "data"}`), the `raw_data` of the
