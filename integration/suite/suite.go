@@ -94,6 +94,7 @@ var cases = []testCase{
 	{"search/data-bag-items", testSearchDataBagItems},
 	{"required-recipe/get", testRequiredRecipe},
 	{"license/get", testLicense},
+	{"server/api-version", testServerAPIVersion},
 	{"stats/get", testStats},
 	{"cookbooks/rejects-manifest-without-metadata", testRejectsManifestWithoutMetadata},
 	{"cookbooks/rejects-all-files-under-api-v1", testRejectsAllFilesUnderAPIv1},

@@ -79,6 +79,10 @@ model, so callers don't re-encode server conventions:
   them back into `https://host/organizations/<org>`, escaping the org.
 - `Client.ServerURL()` / `Org()` / `ClientName()` — the identity a client
   was built with, so callers need not keep their own copy.
+- `Response.ServerAPIVersion()` — parse the `X-Ops-Server-API-Version`
+  header every Chef Server response carries (supported min/max, and the
+  requested and answered versions); `Client.ServerAPIVersion(ctx)` probes
+  `GET /server_api_version` for the same when no other response is at hand.
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
