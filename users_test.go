@@ -175,3 +175,125 @@ func TestUsers_Authenticate_BadPassword(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
 }
+
+func TestUsers_Create_RequestBody(t *testing.T) {
+	t.Run("asks the server to generate a key by default", func(t *testing.T) {
+		// Under API v1 erchef creates a keyless user unless create_key or
+		// public_key is sent.
+		srv := cinctest.New(t)
+		srv.Handle("POST /users", cinctest.Route{
+			Status: 201,
+			Body:   `{"uri":"http://x/users/alice","chef_key":{"name":"default","private_key":"-----BEGIN"}}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				m := decodeBody(t, body)
+				if m["create_key"] != true {
+					t.Errorf("create_key = %v, want true; body %s", m["create_key"], body)
+				}
+				if _, ok := m["public_key"]; ok {
+					t.Errorf("request body carries public_key: %s", body)
+				}
+			},
+		})
+		c := newTestClient(t, srv.Server)
+		u := &User{UserName: "alice", DisplayName: "Alice", Email: "a@example.com", Password: "s3cret!"}
+		res, _, err := c.Users.Create(context.Background(), u)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if res.ChefKey.PrivateKey == "" {
+			t.Errorf("Create returned no private key: %+v", res)
+		}
+		if u.CreateKey {
+			t.Error("Create modified the caller's User")
+		}
+	})
+
+	t.Run("sends a supplied public key instead of create_key", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("POST /users", cinctest.Route{
+			Status: 201,
+			Body:   `{"uri":"http://x/users/bob"}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				m := decodeBody(t, body)
+				if m["public_key"] != "PUB" {
+					t.Errorf("public_key = %v, want PUB; body %s", m["public_key"], body)
+				}
+				if _, ok := m["create_key"]; ok {
+					t.Errorf("request body carries create_key: %s", body)
+				}
+			},
+		})
+		c := newTestClient(t, srv.Server)
+		if _, _, err := c.Users.Create(context.Background(), &User{UserName: "bob", PublicKey: "PUB"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+}
+
+func TestUsers_SetPassword(t *testing.T) {
+	srv := cinctest.New(t)
+	// The GET carries fields User does not model; they go back unchanged.
+	srv.Handle("GET /users/alice", cinctest.Route{
+		Body: `{"username":"alice","display_name":"Alice","email":"alice@example.com",
+			"first_name":"Alice","twitter_account":"al","recovery_authentication_enabled":false,
+			"public_key":"PUB"}`,
+	})
+	srv.Handle("PUT /users/alice", cinctest.Route{
+		Body: `{"uri":"http://x/users/alice"}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			m := decodeBody(t, body)
+			want := map[string]any{
+				"username": "alice", "display_name": "Alice", "email": "alice@example.com",
+				"first_name": "Alice", "twitter_account": "al", "recovery_authentication_enabled": false,
+				"password": "n3w-secret",
+			}
+			for k, v := range want {
+				if m[k] != v {
+					t.Errorf("PUT %s = %v, want %v; body %s", k, m[k], v, body)
+				}
+			}
+			// erchef rejects key fields on a user PUT under API v1.
+			if _, ok := m["public_key"]; ok {
+				t.Errorf("PUT body carries public_key: %s", body)
+			}
+			if len(m) != len(want) {
+				t.Errorf("PUT body = %s, want exactly %v", body, want)
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	resp, err := c.Users.SetPassword(context.Background(), "alice", "n3w-secret")
+	if err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		t.Errorf("SetPassword response = %+v", resp)
+	}
+}
+
+func TestUsers_SetPassword_Errors(t *testing.T) {
+	t.Run("user not found", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /users/ghost", cinctest.Route{Status: 404, Body: `{"error":["no such user"]}`})
+		c := newTestClient(t, srv.Server)
+		if _, err := c.Users.SetPassword(context.Background(), "ghost", "whatever"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("SetPassword: err = %v, want ErrNotFound", err)
+		}
+	})
+	t.Run("update rejected", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /users/alice", cinctest.Route{Body: `{"username":"alice","display_name":"A","email":"a@example.com"}`})
+		srv.Handle("PUT /users/alice", cinctest.Route{Status: 400, Body: `{"error":["Password must have at least 6 characters"]}`})
+		c := newTestClient(t, srv.Server)
+		resp, err := c.Users.SetPassword(context.Background(), "alice", "short")
+		if err == nil || resp == nil || resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("SetPassword = %+v, %v; want the 400", resp, err)
+		}
+	})
+}
+
+func TestSuperuserName(t *testing.T) {
+	if SuperuserName != "pivotal" {
+		t.Errorf("SuperuserName = %q", SuperuserName)
+	}
+}

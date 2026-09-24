@@ -12,7 +12,8 @@ type Key struct {
 	ExpirationDate string `json:"expiration_date,omitempty"` // "infinity" or ISO-8601 UTC
 
 	// CreateKey, when true on a create request, asks the server to generate
-	// the keypair. The response will then carry PrivateKey.
+	// the keypair. The response will then carry PrivateKey. KeyScope.Create
+	// sends it whenever PublicKey is empty.
 	CreateKey bool `json:"create_key,omitempty"`
 
 	// PrivateKey is populated only on the response to a server-generated
@@ -65,10 +66,20 @@ func (s *KeyScope) Get(ctx context.Context, name string) (*Key, *Response, error
 	return ptrOrNil(k, err), resp, err
 }
 
-// Create adds a new key. Set k.CreateKey to have the server generate the
-// keypair; the response's PrivateKey will then be set.
+// Create adds a new key. Unless k.PublicKey is set, the server generates the
+// keypair and the response's PrivateKey carries the private half: erchef
+// requires one of public_key or create_key, so create_key is sent whenever no
+// public key is. It also requires expiration_date, so an empty
+// k.ExpirationDate is sent as "infinity". k is not modified.
 func (s *KeyScope) Create(ctx context.Context, k *Key) (*Key, *Response, error) {
-	created, resp, err := do[Key](ctx, s.client, "POST", s.path, k)
+	req := *k
+	if req.PublicKey == "" {
+		req.CreateKey = true
+	}
+	if req.ExpirationDate == "" {
+		req.ExpirationDate = "infinity"
+	}
+	created, resp, err := do[Key](ctx, s.client, "POST", s.path, &req)
 	return ptrOrNil(created, err), resp, err
 }
 

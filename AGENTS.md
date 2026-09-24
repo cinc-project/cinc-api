@@ -78,6 +78,21 @@ file new ones at cinc-project/cinc-server-ng):
   `create_key`. Real erchef under API v1 creates a keyless client (no
   `chef_key` in the response, no `default` key) unless `create_key: true`
   or `public_key` is sent.
+- **cinc-server-ng** generates a key on `POST /clients` and `POST /users`
+  even without `create_key`. Real erchef under API v1 creates a keyless
+  client or user (no `chef_key` in the response, no `default` key) unless
+  `create_key: true` or `public_key` is sent, which is why `Clients.Create`
+  and `Users.Create` send `create_key` whenever no public key is given.
+- **cinc-server-ng** accepts `POST .../keys` with neither `create_key` nor
+  `public_key` (it generates one) and without `expiration_date` (it stores
+  `infinity`). erchef rejects both with a 400; `KeyScope.Create` fills them in.
+- **cinc-server-ng** serves `GET /server_api_version` unauthenticated and adds
+  `request_version`/`response_version` to its body; erchef wants a signed
+  request (any requestor) and sends only `min_api_version`/`max_api_version`.
+  The `X-Ops-Server-API-Version` header is the same shape on both, except that
+  cinc-server-ng answers a non-numeric requested version with a 400 whose
+  header says `request_version`/`response_version` are the minimum, where
+  erchef sends a 406 with both `-1`.
 - **cinc-server-ng** accepts a cookbook manifest with no `metadata` block,
   with bare file names (`default.rb` instead of `recipes/default.rb`), and
   with `all_files` at server API version 1. erchef rejects the first and

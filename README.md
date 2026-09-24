@@ -46,7 +46,7 @@ following endpoint families are implemented:
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
-| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / Authenticate                 |
+| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / SetPassword / Authenticate   |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithRootCAs`, `WithMaxRetries`,
@@ -101,6 +101,17 @@ model, so callers don't re-encode server conventions:
   a chef-client run) is overwritten.
 - `Clients.Create` asks the server to generate the client's `default` keypair
   (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
+  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
+  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
+- `Clients.Create` and `Users.Create` ask the server to generate the
+  `default` keypair (returned in `ChefKey.PrivateKey`) unless a `PublicKey` is
+  set; under API v1 the server would otherwise create them without a key.
+  `KeyScope.Create` does the same for an added key, and sends an empty
+  `ExpirationDate` as `"infinity"`, since the server requires one.
+- `Users.SetPassword(name, password)` — change a password. The server's user
+  PUT is a full update, so this re-sends the user's current fields with it.
+- `SuperuserName` — `"pivotal"`, the built-in superuser that creating orgs,
+  `/authenticate_user` and invitation-free org membership are reserved to.
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return
   the new private key (creating one if the client has none).
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a

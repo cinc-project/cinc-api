@@ -165,3 +165,30 @@ func newClient(t *testing.T, c *cinc.Client) string {
 	}
 	return name
 }
+
+// testKeyCreateDefaults adds a key giving only its name. erchef requires
+// expiration_date and one of public_key or create_key; KeyScope.Create fills
+// in a server-generated, non-expiring key.
+func testKeyCreateDefaults(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	keys := c.Keys.Client(newClient(t, c))
+	name := uniqueName(t, "key")
+	cleanup(t, "key "+name, func(ctx context.Context) error {
+		_, err := keys.Delete(ctx, name)
+		return err
+	})
+	created, _, err := keys.Create(ctx, &cinc.Key{Name: name})
+	if err != nil {
+		t.Fatalf("Create with only a name: %v", err)
+	}
+	if created.PrivateKey == "" {
+		t.Fatalf("created key = %+v, want a server-generated private key", created)
+	}
+	got, _, err := keys.Get(ctx, name)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PublicKey == "" || got.ExpirationDate != "infinity" {
+		t.Fatalf("key = %+v, want a public key that never expires", got)
+	}
+}
