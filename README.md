@@ -90,8 +90,10 @@ model, so callers don't re-encode server conventions:
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
   `normal.tags`), `AddRunListItems`/`RemoveRunListItems`,
-  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths),
-  `LastCheckin()` (from `automatic.ohai_time`), and `EnvironmentName()`
+  `Attribute`/`AttributeString`/`AttributeScalar` (precedence-aware lookup,
+  dotted paths; a one-element array reads as its element, and a map or null
+  is not a scalar, so `AttributeString` gives `""` and `AttributeScalar`
+  reports `false` rather than Go's `map[...]` text), `LastCheckin()` (from `automatic.ohai_time`), and `EnvironmentName()`
   (`_default` when unset).
 - `NormalizeRunListItem(item)` / `NormalizeRunList(items)` — the run-list
   form erchef stores: a bare `nginx` becomes `recipe[nginx]`, then exact
@@ -102,10 +104,6 @@ model, so callers don't re-encode server conventions:
   and PUT it only if its encoding changed (a rename is refused). Nodes
   have no optimistic concurrency, so a concurrent write in between (such as
   a chef-client run) is overwritten.
-- `Clients.Create` asks the server to generate the client's `default` keypair
-  (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
-  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
-  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
 - `Clients.Create` and `Users.Create` ask the server to generate the
   `default` keypair (returned in `ChefKey.PrivateKey`) unless a `PublicKey` is
   set; under API v1 the server would otherwise create them without a key.

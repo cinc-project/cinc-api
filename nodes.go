@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -154,30 +155,51 @@ func (n *Node) Attribute(name string) (any, bool) {
 	return nil, false
 }
 
-// AttributeString resolves Attribute and coerces the result to a string: a
-// string is returned as-is, a non-empty array yields its first element
-// (coerced), and any other value is formatted with fmt.Sprint. It returns ""
-// when the attribute is absent. This mirrors how Chef tooling reads a single
-// scalar attribute (e.g. fqdn) that may be stored as a one-element array.
+// AttributeString resolves Attribute and coerces the result to a string with
+// AttributeScalar's rules, returning "" when the attribute is absent or is not
+// a scalar (a map, null, or an array that does not lead with a scalar). This
+// mirrors how Chef tooling reads a single scalar attribute (e.g. fqdn) that
+// may be stored as a one-element array.
 func (n *Node) AttributeString(name string) string {
-	v, ok := n.Attribute(name)
-	if !ok {
-		return ""
-	}
-	return attributeToString(v)
+	s, _ := n.AttributeScalar(name)
+	return s
 }
 
-func attributeToString(value any) string {
+// AttributeScalar resolves Attribute and reports its value as a string when it
+// is a scalar: a string is returned as-is, a bool or number is formatted (a
+// JSON number without an exponent, so 1700000000 stays "1700000000"), and a
+// non-empty array yields its first element under the same rules. It returns
+// ("", false) when the attribute is absent, null, a map, an empty array, or an
+// array whose first element is none of those scalars, so a caller can tell
+// "cloud" (an object) from a usable host name instead of receiving Go's
+// "map[...]" text.
+func (n *Node) AttributeScalar(name string) (string, bool) {
+	v, ok := n.Attribute(name)
+	if !ok {
+		return "", false
+	}
+	return attributeScalar(v)
+}
+
+func attributeScalar(value any) (string, bool) {
 	switch v := value.(type) {
 	case string:
-		return v
+		return v, true
+	case bool:
+		return strconv.FormatBool(v), true
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), true
+	case json.Number:
+		return v.String(), true
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32:
+		return fmt.Sprint(v), true
 	case []any:
 		if len(v) == 0 {
-			return ""
+			return "", false
 		}
-		return attributeToString(v[0])
+		return attributeScalar(v[0])
 	default:
-		return fmt.Sprint(v)
+		return "", false
 	}
 }
 
