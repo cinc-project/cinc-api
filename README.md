@@ -49,8 +49,10 @@ following endpoint families are implemented:
 | `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / Authenticate                 |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
-`WithChefVersion`, `WithSkipTLSVerify`, `WithMaxRetries`,
-`WithTransferTimeout`. Idempotent GETs are retried on 5xx and network errors,
+`WithChefVersion`, `WithSkipTLSVerify`, `WithRootCAs`, `WithMaxRetries`,
+`WithTransferTimeout`. `WithRootCAs(pool)` verifies the server against a
+private CA while keeping the default client and its 30-second timeout; with
+`WithHTTPClient` it applies to a copy of that client's transport. Idempotent GETs are retried on 5xx and network errors,
 but not on a failed TLS certificate check. Any other request is retried only
 on `503 Service Unavailable`, which means the server did not process it (a
 Chef Server under load answers `POST /users` and `POST /clients` this way);
@@ -73,6 +75,10 @@ model, so callers don't re-encode server conventions:
 
 - `ParseServerURL(raw)` — split `https://host/organizations/<org>` into the
   base server URL and org (the inverse of `NewClient`'s `ServerURL`/`Org`).
+- `FormatServerURL(serverURL, org)` — the inverse of `ParseServerURL`: join
+  them back into `https://host/organizations/<org>`, escaping the org.
+- `Client.ServerURL()` / `Org()` / `ClientName()` — the identity a client
+  was built with, so callers need not keep their own copy.
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
