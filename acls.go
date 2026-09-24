@@ -76,7 +76,7 @@ func ExpandPerm(perm string) ([]string, error) {
 	if slices.Contains(ACLPerms, perm) {
 		return []string{perm}, nil
 	}
-	return nil, fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, grant, or all", perm)
+	return nil, fmt.Errorf("cinc: unknown permission %q: want one of create, read, update, delete, grant, or all", perm)
 }
 
 // ACL is the complete permission set for a Chef object — five ACEs, one per
@@ -113,7 +113,7 @@ func (a *ACL) ACEFor(perm string) (*ACE, error) {
 // server serves an endpoint for. "all" is a pseudo-permission understood only
 // by ExpandPerm, so it lands here too.
 func errUnknownPerm(perm string) error {
-	return fmt.Errorf("cinc: unknown permission %q — want one of create, read, update, delete, or grant (expand %q with ExpandPerm)", perm, "all")
+	return fmt.Errorf("cinc: unknown permission %q: want one of create, read, update, delete, or grant (expand %q with ExpandPerm)", perm, "all")
 }
 
 // Object-type URL segments for the org-scoped objects erchef serves an _acl

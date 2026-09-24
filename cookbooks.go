@@ -545,15 +545,17 @@ func SkipChefignore() LocalCookbookOption {
 // anything computed in Ruby.
 //
 // The cookbook name is the metadata's name, falling back to the base name of
-// dir (which Policies.PushRevision replaces with the cookbook lock's name). version is the version to upload as; when empty the metadata's version
-// is used, and failing that Chef's default of "0.0.0". A version that differs
-// from the one the metadata declares is an error, since the server would
-// reject the mismatch, and so, when version is empty, is a metadata.rb that
-// computes its version (ErrMetadataVersionNotLiteral), which would otherwise
-// upload as 0.0.0. Every remaining regular file is checksummed as it is
-// read; its content is not kept, but streamed from disk again by the upload.
-// An empty directory is an error. The selected files are available from
-// Files, and the Policyfile identifier over them from Identifiers. The
+// dir made absolute, so "." names the cookbook after the working directory
+// (Policies.PushRevision replaces that fallback with the cookbook lock's
+// name). version is the version to upload as; when empty the metadata's
+// version is used, and failing that Chef's default of "0.0.0". A version that
+// differs from the one the metadata declares is an error, since the server
+// would reject the mismatch, and so, when version is empty, is a metadata.rb
+// that computes its version (ErrMetadataVersionNotLiteral), which would
+// otherwise upload as 0.0.0. Every remaining regular file is checksummed as
+// it is read; its content is not kept, but streamed from disk again by the
+// upload. An empty directory is an error. The selected files are available
+// from Files, and the Policyfile identifier over them from Identifiers. The
 // SkipChefignore option keeps the files chefignore would drop.
 func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*LocalCookbook, error) {
 	var o localCookbookOptions
@@ -574,7 +576,7 @@ func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*Lo
 	md := *loaded
 	nameFromDir := md.Name == ""
 	if nameFromDir {
-		md.Name = filepath.Base(dir)
+		md.Name = cookbookDirName(dir)
 	}
 	switch {
 	case version == "" && md.Version == "":
@@ -650,6 +652,17 @@ func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*Lo
 	// Byte order, as Chef compares paths; a walk visits "a/" before "a.rb".
 	slices.SortFunc(cb.files, func(a, b cookbookFile) int { return strings.Compare(a.name, b.name) })
 	return cb, nil
+}
+
+// cookbookDirName is the name a cookbook without a metadata name takes from
+// its directory: the base name of dir made absolute, so a relative "." or
+// ".." is named after the directory it refers to. Should the working
+// directory be unreadable, it falls back to dir as given.
+func cookbookDirName(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return filepath.Base(dir)
 }
 
 // cookbookSymlinkTarget reports whether the symlink at path resolves to a

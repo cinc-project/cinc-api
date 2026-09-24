@@ -27,8 +27,19 @@ type ErrorResponse struct {
 	Messages   []string // server-reported error messages
 }
 
+// ServerMessage returns what the server said, its Messages joined with "; ",
+// without Error's "cinc: METHOD PATH: CODE:" prefix or the 401 hint. It is ""
+// when the server sent no message (or e is nil), so a caller can fall back to
+// its own wording.
+func (e *ErrorResponse) ServerMessage() string {
+	if e == nil {
+		return ""
+	}
+	return strings.Join(e.Messages, "; ")
+}
+
 func (e *ErrorResponse) Error() string {
-	msg := strings.Join(e.Messages, "; ")
+	msg := e.ServerMessage()
 	if msg == "" {
 		msg = "(no message)"
 	}

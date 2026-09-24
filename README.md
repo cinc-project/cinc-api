@@ -85,27 +85,35 @@ model, so callers don't re-encode server conventions:
 - `Response.ServerAPIVersion()` — parse the `X-Ops-Server-API-Version`
   header every Chef Server response carries (supported min/max, and the
   requested and answered versions); `Client.ServerAPIVersion(ctx)` probes
-  `GET /server_api_version` for the same when no other response is at hand.
+  `GET /server_api_version` for the same when no other response is at hand,
+  returning `ErrNoServerAPIVersion` (never a version of 0) when the answer
+  reports no range.
+- `ErrorResponse.ServerMessage()` — just the server's error message(s),
+  joined with `; `, without `Error()`'s `cinc: METHOD PATH: CODE:` prefix or
+  the 401 hint (`""` when the server sent none).
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at
   `normal.tags`), `AddRunListItems`/`RemoveRunListItems`,
-  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths),
-  `LastCheckin()` (from `automatic.ohai_time`), and `EnvironmentName()`
+  `Attribute`/`AttributeString`/`AttributeScalar` (precedence-aware lookup,
+  dotted paths; a one-element array reads as its element, and a map or null
+  is not a scalar, so `AttributeString` gives `""` and `AttributeScalar`
+  reports `false` rather than Go's `map[...]` text), `LastCheckin()` (from `automatic.ohai_time`), and `EnvironmentName()`
   (`_default` when unset).
 - `NormalizeRunListItem(item)` / `NormalizeRunList(items)` — the run-list
   form erchef stores: a bare `nginx` becomes `recipe[nginx]`, then exact
   duplicates are dropped in order. `Node` and `Role`
   `AddRunListItems`/`RemoveRunListItems` compare and write normalized
   entries, so `nginx` and `recipe[nginx]` are the same item.
+- `ValidateRunListItem(item)` — erchef's run-list entry check
+  (`role[NAME]`, or `COOKBOOK[::RECIPE][@VERSION]`, bare or in
+  `recipe[...]`), wrapping `ErrInvalidRunListItem`, so a malformed entry such
+  as `recipe[` is refused before the server answers the save with a 400.
+  `NormalizeRunList` does not validate; call this on user input first.
 - `Nodes.Modify(name, fn)` — read-modify-write: get the node, apply `fn`,
   and PUT it only if its encoding changed (a rename is refused). Nodes
   have no optimistic concurrency, so a concurrent write in between (such as
   a chef-client run) is overwritten.
-- `Clients.Create` asks the server to generate the client's `default` keypair
-  (returned in `ChefKey.PrivateKey`) unless `APIClient.PublicKey` is set.
-  `normal.tags`), `AddRunListItems`/`RemoveRunListItems`, and
-  `Attribute`/`AttributeString` (precedence-aware lookup, dotted paths).
 - `Clients.Create` and `Users.Create` ask the server to generate the
   `default` keypair (returned in `ChefKey.PrivateKey`) unless a `PublicKey` is
   set; under API v1 the server would otherwise create them without a key.
@@ -149,9 +157,9 @@ model, so callers don't re-encode server conventions:
   call each; an edit is `GetDecrypted`, a change, then `UpdateEncrypted`.
 - `LoadDataBagSecret(path)` / `ParseDataBagSecret(data)` — read a shared
   secret file exactly as Chef's `EncryptedDataBagItem.load_secret` does:
-  leading and trailing NUL and ASCII whitespace stripped, UTF-8 required, an
-  empty secret refused (`ErrEmptyDataBagSecret`). Chef's remote (URL) secrets
-  are not supported.
+  leading and trailing NUL and ASCII whitespace stripped, UTF-8 required
+  (`ErrInvalidDataBagSecret`), an empty secret refused
+  (`ErrEmptyDataBagSecret`). Chef's remote (URL) secrets are not supported.
 - `DataBagItem.Validate()` — the non-empty string `id` check `Create`,
   `Update` and `Encrypt` apply (`ErrMissingDataBagItemID`), for vetting an
   edited item up front. `DataBagItem.Content()` — the item without `id` and
@@ -172,7 +180,8 @@ model, so callers don't re-encode server conventions:
   uploads, archives, and identifier computation agree on which files belong to
   a cookbook. `LocalCookbookFromDir` honors it, and like Chef's loader also
   skips dot-directories at the cookbook root and takes the cookbook name from
-  `metadata.json` / `metadata.rb` rather than the directory name.
+  `metadata.json` / `metadata.rb` rather than the directory name (which it
+  falls back to, resolved first so `.` is named after the working directory).
 - `LoadCookbookMetadata(dir)` / `ParseMetadataJSON(data)` /
   `ParseMetadataRb(data)` — read a cookbook's metadata into a
   `CookbookMetadata`, preferring `metadata.json` over `metadata.rb` as Chef's

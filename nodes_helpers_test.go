@@ -181,20 +181,43 @@ func TestNodeAttributeString(t *testing.T) {
 		"ipaddrs":  []any{"10.0.0.5", "10.0.0.6"},
 		"emptylst": []any{},
 		"port":     8080,
+		"float":    float64(22),
+		"big":      float64(1700000000.5),
+		"jsonnum":  json.Number("42"),
+		"enabled":  true,
+		"nothing":  nil,
+		"cloud":    map[string]any{"public_ipv4": "1.2.3.4"},
+		"attrs":    Attributes{"a": "b"},
+		"maplist":  []any{map[string]any{"a": "b"}, "x"},
+		"nested":   []any{[]any{"inner"}},
 	}}
 	cases := []struct {
 		name, key, want string
+		ok              bool
 	}{
-		{name: "plain string", key: "fqdn", want: "web01"},
-		{name: "first element of array", key: "ipaddrs", want: "10.0.0.5"},
+		{name: "plain string", key: "fqdn", want: "web01", ok: true},
+		{name: "first element of array", key: "ipaddrs", want: "10.0.0.5", ok: true},
 		{name: "empty array", key: "emptylst", want: ""},
-		{name: "non-string coerced", key: "port", want: "8080"},
+		{name: "non-string coerced", key: "port", want: "8080", ok: true},
+		{name: "JSON number", key: "float", want: "22", ok: true},
+		{name: "large JSON number not in exponent form", key: "big", want: "1700000000.5", ok: true},
+		{name: "json.Number", key: "jsonnum", want: "42", ok: true},
+		{name: "bool", key: "enabled", want: "true", ok: true},
+		{name: "null", key: "nothing", want: ""},
+		{name: "map", key: "cloud", want: ""},
+		{name: "Attributes map", key: "attrs", want: ""},
+		{name: "array led by a map", key: "maplist", want: ""},
+		{name: "array of arrays", key: "nested", want: "inner", ok: true},
 		{name: "absent key", key: "missing", want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := n.AttributeString(tc.key); got != tc.want {
 				t.Errorf("AttributeString(%q) = %q, want %q", tc.key, got, tc.want)
+			}
+			got, ok := n.AttributeScalar(tc.key)
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("AttributeScalar(%q) = (%q, %v), want (%q, %v)", tc.key, got, ok, tc.want, tc.ok)
 			}
 		})
 	}

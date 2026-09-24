@@ -130,3 +130,24 @@ func TestErrorResponse_NonAuthHasNoHint(t *testing.T) {
 		t.Errorf("Error() = %q, want no 401 hint", got)
 	}
 }
+
+func TestErrorResponse_ServerMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		err  *ErrorResponse
+		want string
+	}{
+		{name: "one message", err: &ErrorResponse{Method: "GET", Path: "/nodes/x", StatusCode: 404, Messages: []string{"node 'x' not found"}}, want: "node 'x' not found"},
+		{name: "several joined", err: &ErrorResponse{StatusCode: 400, Messages: []string{"Field 'name' invalid", "Field 'run_list' invalid"}}, want: "Field 'name' invalid; Field 'run_list' invalid"},
+		{name: "401 without hint", err: &ErrorResponse{StatusCode: 401, Messages: []string{"Failed to authenticate"}}, want: "Failed to authenticate"},
+		{name: "no message", err: &ErrorResponse{StatusCode: 500}, want: ""},
+		{name: "nil receiver", err: nil, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.ServerMessage(); got != tc.want {
+				t.Errorf("ServerMessage() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

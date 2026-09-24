@@ -134,3 +134,35 @@ func testRoleRunListEditNormalized(t *testing.T, _ Target, c *cinc.Client) {
 		t.Fatalf("run_list = %q, want %q", got.RunList, want)
 	}
 }
+
+// testRoleRunListValidation checks ValidateRunListItem against the server's
+// own run_list validation (erchef's chef_json_validator:run_list_spec, which
+// cinc-server-ng mirrors): a role saved with each item is accepted exactly
+// when the validator accepts the item, and refused with a 400 otherwise.
+func testRoleRunListValidation(t *testing.T, _ Target, c *cinc.Client) {
+	items := []string{
+		"nginx", "nginx::server", "nginx@1.2.3", "recipe[nginx::server@1.2]", "role[web]", "role",
+		"recipe[", "recipe[]", "recipe[nginx", "recipe[a::b::c]", "recipe[nginx@1]",
+		"role[", "role[web::x]", "role[web@1.2]", "nginx::", "ngi nx", "[nginx]",
+	}
+	for _, item := range items {
+		t.Run(item, func(t *testing.T) {
+			ctx := t.Context()
+			name := uniqueName(t, "role")
+			verr := cinc.ValidateRunListItem(item)
+			_, err := c.Roles.Create(ctx, &cinc.Role{Name: name, RunList: []string{item}})
+			if err == nil {
+				cleanup(t, "role "+name, func(ctx context.Context) error {
+					_, err := c.Roles.Delete(ctx, name)
+					return err
+				})
+			}
+			switch {
+			case verr == nil && err != nil:
+				t.Fatalf("ValidateRunListItem(%q) accepted it, but the server refused it: %v", item, err)
+			case verr != nil && !errors.Is(err, cinc.ErrBadRequest):
+				t.Fatalf("ValidateRunListItem(%q) = %v, but the server answered %v, want a 400", item, verr, err)
+			}
+		})
+	}
+}

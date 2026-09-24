@@ -1,9 +1,57 @@
 package cinc
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
+
+// ErrInvalidRunListItem means a run-list entry is not one a Chef Server
+// accepts; ValidateRunListItem wraps it.
+var ErrInvalidRunListItem = errors.New("cinc: invalid run list item")
+
+// The patterns erchef's chef_json_validator:run_list_spec checks each entry
+// against (chef_regex's qualified_role, qualified_recipe and
+// unqualified_recipe): names are NAME_REGEX ([.[:alnum:]_-]+, ASCII), a recipe
+// may be cookbook-qualified ("cookbook::recipe") and may carry a version
+// ("@1.2" or "@1.2.3"), and a role has neither.
+var (
+	runListRoleRE   = regexp.MustCompile(`^role\[[.A-Za-z0-9_-]+\]$`)
+	runListRecipeRE = regexp.MustCompile(`^(?:[.A-Za-z0-9_-]+::)?[.A-Za-z0-9_-]+(?:@[0-9]+(?:\.[0-9]+){1,2})?$`)
+)
+
+// ValidateRunListItem reports whether item is a run-list entry a Chef Server
+// accepts, so a caller can refuse a malformed one (such as "recipe[") before
+// the server answers the whole save with a 400. As erchef does, it picks the
+// pattern by prefix: "role[NAME]"; "recipe[...]" around a recipe; and
+// anything else is a bare recipe, "COOKBOOK" or "COOKBOOK::RECIPE", either
+// optionally followed by "@VERSION" with two or three numeric parts. Names use
+// only ASCII letters, digits, '_', '-' and '.'. A failure wraps
+// ErrInvalidRunListItem and names the item.
+//
+// This mirrors erchef's chef_json_validator:valid_run_list_item/1
+// (chef-server/src/oc_erchef/apps/chef_objects/src/chef_json_validator.erl,
+// with the regexes in chef_regex.erl) and cinc-server-ng's validRunList.
+// NormalizeRunList does not call it; validate entries first when they come
+// from a user.
+func ValidateRunListItem(item string) error {
+	switch {
+	case strings.HasPrefix(item, "role["):
+		if !runListRoleRE.MatchString(item) {
+			return fmt.Errorf("%w %q: a role must be role[NAME], and NAME can use only letters, digits, '.', '_' and '-'", ErrInvalidRunListItem, item)
+		}
+		return nil
+	case strings.HasPrefix(item, "recipe["):
+		if inner, ok := strings.CutSuffix(item[len("recipe["):], "]"); ok && runListRecipeRE.MatchString(inner) {
+			return nil
+		}
+	case runListRecipeRE.MatchString(item):
+		return nil
+	}
+	return fmt.Errorf("%w %q: a recipe must be COOKBOOK or COOKBOOK::RECIPE, optionally in recipe[...] and followed by @VERSION (such as @1.2.3), and names can use only letters, digits, '.', '_' and '-'", ErrInvalidRunListItem, item)
+}
 
 // NormalizeRunListItem returns a run-list entry in the explicit form a Chef
 // Server stores: "role[...]" and "recipe[...]" are returned unchanged, and
