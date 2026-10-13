@@ -255,3 +255,41 @@ func assertFileContent(t *testing.T, path, want string) {
 		t.Errorf("%s = %q, want %q", path, got, want)
 	}
 }
+
+// The destination directory is created if missing; when it cannot be, or
+// cannot be opened, the download fails before fetching anything.
+func TestDownload_DestinationUnusable(t *testing.T) {
+	files := []dlFile{{path: "recipes/default.rb", body: recipeBody, checksum: md5Hex([]byte(recipeBody))}}
+
+	t.Run("destination is a file", func(t *testing.T) {
+		c, fetches := newDownloadFixture(t, files, nil)
+		dest := filepath.Join(t.TempDir(), "dest")
+		writeTestFile(t, dest, "not a dir")
+		err := c.Cookbooks.Download(context.Background(), "nginx", "1.0.0", dest)
+		if err == nil || !strings.Contains(err.Error(), "create dirs") {
+			t.Fatalf("err = %v, want a create-dirs failure", err)
+		}
+		if n := *fetches["/files/recipes/default.rb"]; n != 0 {
+			t.Errorf("fetched %d times before failing, want 0", n)
+		}
+	})
+
+	t.Run("destination cannot be opened", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores directory permissions")
+		}
+		c, fetches := newDownloadFixture(t, files, nil)
+		dest := t.TempDir()
+		if err := os.Chmod(dest, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(dest, 0o755) })
+		err := c.Cookbooks.Download(context.Background(), "nginx", "1.0.0", dest)
+		if err == nil || !strings.Contains(err.Error(), "open") {
+			t.Fatalf("err = %v, want an open failure", err)
+		}
+		if n := *fetches["/files/recipes/default.rb"]; n != 0 {
+			t.Errorf("fetched %d times before failing, want 0", n)
+		}
+	})
+}
