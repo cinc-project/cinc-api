@@ -7,12 +7,10 @@ description: Use when about to commit, open, or update a pull request on cinc-ap
 
 ## Lint
 
-CI runs `golangci-lint` over the root module (pinned to v2.13.2, on Go
-1.26) and again over `integration/` (pinned to v2.14.0, on the Go version
-`integration/go.mod` names), which is a separate module the root run does
-not reach. The integration module's Go floor follows cinc-server-ng's, so
-it can be newer than the root's. It uses the repo's `.golangci.yml`, so run it the same way — with
-the config, not with ad-hoc flags:
+CI runs `golangci-lint` (pinned to v2.14.0, on Go 1.27) over the root
+module and again over `integration/`, which is a separate module the root
+run does not reach. It uses the repo's `.golangci.yml`, so run it the same
+way — with the config, not with ad-hoc flags:
 
 ```
 golangci-lint run ./...

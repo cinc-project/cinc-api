@@ -1,3 +1,3 @@
 module github.com/cinc-project/cinc-api
 
-go 1.26
+go 1.27
