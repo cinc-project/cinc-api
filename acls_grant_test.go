@@ -287,8 +287,7 @@ func TestACLs_GrantReadFails(t *testing.T) {
 	if changed != nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Grant = %v, %v; want nil, ErrNotFound", changed, err)
 	}
-	var ce *ACLChangeError
-	if errors.As(err, &ce) {
+	if _, ok := errors.AsType[*ACLChangeError](err); ok {
 		t.Errorf("a failed read should not be an ACLChangeError: %v", err)
 	}
 }

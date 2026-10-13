@@ -3,6 +3,7 @@ package suite
 import (
 	"bytes"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -34,9 +35,7 @@ func rawRequest(t *testing.T, tgt Target, method, path, apiVersion string, body 
 	if err != nil {
 		t.Fatalf("build %s %s: %v", method, path, err)
 	}
-	for k, v := range hdrs {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, hdrs)
 	req.Header.Set("X-Chef-Version", "16.0.0")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")

@@ -1058,9 +1058,9 @@ func TestAllFiles_DedupesByPath(t *testing.T) {
 // Download must fetch and write each cookbook file exactly once, even when the
 // manifest lists it in both shapes.
 func TestDownload_FetchesEachFileOnce(t *testing.T) {
-	var fetches int64
+	var fetches atomic.Int64
 	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt64(&fetches, 1)
+		fetches.Add(1)
 		w.Write([]byte("# default recipe\n"))
 	}))
 	defer files.Close()
@@ -1077,7 +1077,7 @@ func TestDownload_FetchesEachFileOnce(t *testing.T) {
 	if err := c.Cookbooks.Download(context.Background(), "nginx", "1.0.0", dest); err != nil {
 		t.Fatalf("Download: %v", err)
 	}
-	if got := atomic.LoadInt64(&fetches); got != 1 {
+	if got := fetches.Load(); got != 1 {
 		t.Errorf("bookshelf fetches = %d, want 1", got)
 	}
 }
