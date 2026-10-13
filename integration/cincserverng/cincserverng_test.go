@@ -56,28 +56,37 @@ func run(m *testing.M) int {
 		return 1
 	}
 	cfg := cinc.Config{ServerURL: srv.URL(), Org: org, ClientName: srv.AdminName(), Key: key}
+	// No password is configured, so the server generated one for /_stats.
+	statsUser, statsPassword := srv.StatsCredentials()
+
+	// Make the admin a member of the org, as the cinc-server-erlang stack's
+	// admin is. The bootstrap superuser is not one by default, on
+	// cinc-server-ng as on Chef Infra Server.
+	admin, err := cinc.NewClient(cfg, cinc.WithHTTPClient(hc))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "NewClient: %v\n", err)
+		return 1
+	}
+	if _, err := admin.Associations.AddMember(context.Background(), srv.AdminName()); err != nil {
+		fmt.Fprintf(os.Stderr, "associate %s with %s: %v\n", srv.AdminName(), org, err)
+		return 1
+	}
 
 	target = suite.Target{
-		Name:       "cinc-server-ng",
-		Org:        org,
-		Admin:      srv.AdminName(),
-		ServerURL:  srv.URL(),
-		Key:        key,
-		HTTPClient: hc,
-		// Placeholders: cinc-server-ng wants a signed /_stats request, not
-		// Basic auth, so stats/get is a gap below.
-		StatsUser:     "statsuser",
-		StatsPassword: "unused",
+		Name:          "cinc-server-ng",
+		Org:           org,
+		Admin:         srv.AdminName(),
+		ServerURL:     srv.URL(),
+		Key:           key,
+		HTTPClient:    hc,
+		StatsUser:     statsUser,
+		StatsPassword: statsPassword,
 		Gaps: map[string]string{
-			"principals/get": "returns the API v0 single-object shape under v1: https://github.com/cinc-project/cinc-server-ng/issues/162",
-			"keys/rename":    "key PUT ignores a new name and drops omitted fields: https://github.com/cinc-project/cinc-server-ng/issues/163",
-			"stats/get":      "requires a signed request instead of HTTP Basic auth: https://github.com/cinc-project/cinc-server-ng/issues/164",
-			"cookbooks/rejects-manifest-without-metadata": "accepts a manifest without metadata: https://github.com/cinc-project/cinc-server-ng/issues/160",
-			"cookbooks/rejects-all-files-under-api-v1":    "accepts all_files under API v1: https://github.com/cinc-project/cinc-server-ng/issues/160",
-			"clients/rejects-key-field-on-update":         "accepts and stores create_key on a client PUT: https://github.com/cinc-project/cinc-server-ng/issues/165",
-			"acls/revoke-keeps-admins-on-grant":           "lets a non-superuser remove admins from a grant ACE: https://github.com/cinc-project/cinc-server-ng/issues/211",
-			"cookbooks/list-defaults-to-one-version":      "lists every version on GET /cookbooks without num_versions: https://github.com/cinc-project/cinc-server-ng/issues/212",
-			"cookbooks/rejects-invalid-num-versions":      "accepts an invalid num_versions: https://github.com/cinc-project/cinc-server-ng/issues/212",
+			"keys/rename": "key PUT ignores a new name and drops omitted fields: https://github.com/cinc-project/cinc-server-ng/issues/163",
+			"stats/get":   "/_stats JSON shape differs from erchef (numeric values, labels array): https://github.com/cinc-project/cinc-server-ng/issues/243",
+			// Not a server difference: erchef also lets the superuser take
+			// admins off a grant ACE, and this target's admin is the superuser.
+			"acls/revoke-keeps-admins-on-grant": "the admin here is the pivotal superuser, which erchef also exempts from this check",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()
