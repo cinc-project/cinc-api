@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -161,8 +162,7 @@ func (e *transportErr) Unwrap() error { return e.err }
 // Context cancellation and deadlines never retry: the caller is done waiting.
 // Neither does a failed TLS handshake that will fail the same way next time.
 func isRetriable(err error) bool {
-	var te *transportErr
-	if !errors.As(err, &te) {
+	if _, ok := errors.AsType[*transportErr](err); !ok {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -218,8 +218,8 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 	// Strip the query string from the path used for signing only; the v1.3
 	// signing spec requires the canonical path to exclude the query string.
 	signPath := path
-	if i := strings.IndexByte(path, '?'); i >= 0 {
-		signPath = path[:i]
+	if before, _, ok := strings.Cut(path, "?"); ok {
+		signPath = before
 	}
 	apiVersion, _ := ctx.Value(apiVersionKey{}).(string)
 	hdrs, err := signing.SignHeaders(signing.Request{
@@ -230,9 +230,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 	if err != nil {
 		return nil, nil, err
 	}
-	for k, v := range hdrs {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, hdrs)
 	req.Header.Set("X-Chef-Version", c.opts.chefVersion)
 	req.Header.Set("User-Agent", c.opts.userAgent)
 	req.Header.Set("Accept", "application/json")

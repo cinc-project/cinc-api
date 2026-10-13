@@ -65,10 +65,7 @@ func TestSearch_AllWithStart(t *testing.T) {
 		requestStarts = append(requestStarts, start)
 
 		// Build a page of rows beginning at 'start'.
-		end := start + pageSize
-		if end > totalRows {
-			end = totalRows
-		}
+		end := min(start+pageSize, totalRows)
 		var rows []string
 		for i := start; i < end; i++ {
 			rows = append(rows, fmt.Sprintf(`{"idx":%d}`, i))

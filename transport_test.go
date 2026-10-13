@@ -571,9 +571,9 @@ func recordSleeps(c *Client) *[]time.Duration {
 // A 5xx is retried, and the client waits longer before each attempt rather
 // than firing every attempt inside the same microsecond.
 func TestRetry_BacksOffBetweenAttempts(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(500)
 	}))
 	defer srv.Close()
@@ -583,7 +583,7 @@ func TestRetry_BacksOffBetweenAttempts(t *testing.T) {
 	if _, _, err := do[map[string]any](context.Background(), c, "GET", "/nodes/x", nil); err == nil {
 		t.Fatal("want an error from a persistent 500")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("attempts = %d, want 3 (initial + 2 retries)", got)
 	}
 	if len(*sleeps) != 2 {
