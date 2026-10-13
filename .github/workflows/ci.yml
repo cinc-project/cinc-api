@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26' }
+        with: { go-version: '1.27' }
       - run: go build ./...
       - run: go test -race -coverprofile=coverage.out ./...
 
@@ -19,10 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The integration module's Go floor follows cinc-server-ng's, which can
-      # be newer than the root module's; consumers of the root never see it.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version-file: integration/go.mod }
+        with: { go-version: '1.27' }
       - run: go test -race ./...
         working-directory: integration
       # The cinc-server-erlang stack is only applied by hand
@@ -41,17 +39,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26' }
+        with: { go-version: '1.27' }
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           # Pinned so a new linter release cannot turn a green branch red
           # without a commit.
-          version: v2.13.2
-      # The integration module needs the newer Go its go.mod names, and a
-      # golangci-lint release built with it.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version-file: integration/go.mod }
+          version: v2.14.0
       - name: golangci-lint (integration module)
         # A separate Go module, so the run above does not reach it — and
         # neither did the `go vet ./...` this job replaces.
