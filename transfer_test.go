@@ -190,8 +190,20 @@ func downloadFrom(t *testing.T, shelf *flakyShelf, checksum string, dest string)
 	t.Helper()
 	c := newTestClient(t, shelf.Server)
 	recordSleeps(c)
-	return c.downloadFile(context.Background(), shelf.URL+"/files/recipes/default.rb",
-		filepath.Join(dest, "recipes", "default.rb"), checksum)
+	return c.downloadFile(context.Background(), openTestRoot(t, dest), shelf.URL+"/files/recipes/default.rb",
+		filepath.Join("recipes", "default.rb"), checksum)
+}
+
+// openTestRoot opens dir as the root downloads are written under, closed
+// when the test ends.
+func openTestRoot(t *testing.T, dir string) *os.Root {
+	t.Helper()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	return root
 }
 
 func TestDownloadFile_RetriesTransientFailures(t *testing.T) {
@@ -270,8 +282,7 @@ func TestTransfer_NotBoundByAPITimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(t.TempDir(), "f")
-	if err := c.downloadFile(context.Background(), shelf.URL+"/f", dest, ""); err != nil {
+	if err := c.downloadFile(context.Background(), openTestRoot(t, t.TempDir()), shelf.URL+"/f", "f", ""); err != nil {
 		t.Fatalf("download bounded by the 50ms API timeout: %v", err)
 	}
 	if err := c.uploadFile(context.Background(), shelf.URL+"/f", tempCookbookFile(t, "x")); err != nil {
@@ -294,7 +305,7 @@ func TestTransfer_BoundByTransferTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	sleeps := recordSleeps(c)
-	err = c.downloadFile(context.Background(), shelf.URL+"/f", filepath.Join(t.TempDir(), "f"), "")
+	err = c.downloadFile(context.Background(), openTestRoot(t, t.TempDir()), shelf.URL+"/f", "f", "")
 	if err == nil || !strings.Contains(err.Error(), "Timeout") {
 		t.Fatalf("err = %v, want a transfer timeout", err)
 	}
@@ -337,11 +348,11 @@ func TestTransfer_SkipTLSVerifyApplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(t.TempDir(), "f")
-	if err := c.downloadFile(context.Background(), shelf.URL+"/f", dest, ""); err != nil {
+	dir := t.TempDir()
+	if err := c.downloadFile(context.Background(), openTestRoot(t, dir), shelf.URL+"/f", "f", ""); err != nil {
 		t.Fatalf("downloadFile over self-signed TLS: %v", err)
 	}
-	if _, err := os.Stat(dest); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "f")); err != nil {
 		t.Error(err)
 	}
 }

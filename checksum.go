@@ -26,8 +26,13 @@ func fileMD5Hex(path string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = f.Close() }() // read-only: nothing to flush, nothing to lose
+	return readerMD5Hex(f)
+}
+
+// readerMD5Hex returns the lower-case hex MD5 digest of everything r yields.
+func readerMD5Hex(r io.Reader) (string, error) {
 	h := newMD5()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil

@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -267,6 +268,11 @@ func (s *CookbooksService) Download(ctx context.Context, name, version, destDir 
 // in sandboxes.go; no API request is made. Each file is verified against the
 // manifest's MD5 checksum and written atomically; files already in destDir
 // with a matching checksum are skipped.
+//
+// Nothing is written outside destDir. Besides rejecting manifest paths that
+// leave it, writes go through an os.Root on destDir: a symlink already under
+// destDir may point elsewhere inside it, but one pointing out of it fails the
+// download (a directory) or is replaced by the downloaded file (a file).
 func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, destDir string) error {
 	if cb == nil {
 		return fmt.Errorf("cinc: DownloadFiles: nil cookbook manifest")
@@ -274,19 +280,29 @@ func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, dest
 	// Resolve and validate every destination path up front (cheap, sequential)
 	// so a traversal attempt fails fast before any file is fetched or written.
 	refs := cb.AllFiles()
-	type fileDownload struct{ url, dest, path, checksum string }
+	type fileDownload struct{ url, rel, path, checksum string }
 	jobs := make([]fileDownload, len(refs))
 	for i, ref := range refs {
-		dest := filepath.Join(destDir, filepath.FromSlash(ref.Path))
-		rel, err := filepath.Rel(destDir, dest)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rel := filepath.FromSlash(ref.Path)
+		if !filepath.IsLocal(rel) {
 			return fmt.Errorf("cinc: unsafe file path in cookbook manifest: %q", ref.Path)
 		}
-		jobs[i] = fileDownload{url: ref.URL, dest: dest, path: ref.Path, checksum: ref.Checksum}
+		jobs[i] = fileDownload{url: ref.URL, rel: rel, path: ref.Path, checksum: ref.Checksum}
 	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("cinc: create dirs: %w", err)
+	}
+	// Every write goes through root, so a symlink already under destDir can
+	// lead elsewhere inside it but never out of it: the manifest paths are
+	// checked above, and the filesystem they land in is held to destDir here.
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return fmt.Errorf("cinc: open %s: %w", destDir, err)
+	}
+	defer func() { _ = root.Close() }()
 	// Cookbook files are independent and latency-bound; fetch them in parallel.
 	return parallelForEach(ctx, jobs, func(ctx context.Context, j fileDownload) error {
-		if err := s.client.downloadFile(ctx, j.url, j.dest, j.checksum); err != nil {
+		if err := s.client.downloadFile(ctx, root, j.url, j.rel, j.checksum); err != nil {
 			return fmt.Errorf("cinc: download %s: %w", j.path, err)
 		}
 		return nil
@@ -294,17 +310,17 @@ func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, dest
 }
 
 // downloadFile GETs a pre-signed bookshelf URL (no Chef signing) and writes
-// the body to dest, creating parent directories as needed.
+// the body to rel under root, creating parent directories as needed.
 //
 // checksum is the hex MD5 the cookbook manifest lists for the file. When set,
-// a file already at dest with that digest is left alone and not fetched, and
+// a file already at rel with that digest is left alone and not fetched, and
 // a fetched body that does not match it is rejected. The body is streamed to
-// a temp file beside dest and renamed into place only once it is complete and
+// a temp file beside rel and renamed into place only once it is complete and
 // verified, so a failed download never leaves a truncated or corrupt file at
-// dest. An empty checksum disables both the skip and the check.
-func (c *Client) downloadFile(ctx context.Context, fileURL, dest, checksum string) error {
+// rel. An empty checksum disables both the skip and the check.
+func (c *Client) downloadFile(ctx context.Context, root *os.Root, fileURL, rel, checksum string) error {
 	if checksum != "" {
-		if have, err := fileMD5Hex(dest); err == nil && strings.EqualFold(have, checksum) {
+		if have, err := rootFileMD5Hex(root, rel); err == nil && strings.EqualFold(have, checksum) {
 			return nil
 		}
 	}
@@ -317,20 +333,32 @@ func (c *Client) downloadFile(ctx context.Context, fileURL, dest, checksum strin
 		}
 		return req, nil
 	}, func(resp *http.Response) error {
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
 			return fmt.Errorf("cinc: create dirs: %w", err)
 		}
-		return writeVerified(dest, wireReader{resp.Body}, checksum)
+		return writeVerified(root, rel, wireReader{resp.Body}, checksum)
 	})
 }
 
-// writeVerified streams r into dest atomically: it writes to a temp file in
-// dest's directory (so the final rename cannot cross filesystems), hashing as
-// it goes, and renames it over dest only if the digest matches checksum (or
-// checksum is empty). On any failure the temp file is removed and dest is
-// untouched.
-func writeVerified(dest string, r io.Reader, checksum string) (err error) {
-	tmp, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".*.tmp")
+// rootFileMD5Hex is fileMD5Hex for a file under root. A symlink leading out
+// of root fails to open, so it never counts as an up-to-date copy.
+func rootFileMD5Hex(root *os.Root, rel string) (string, error) {
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }() // read-only: nothing to flush, nothing to lose
+	return readerMD5Hex(f)
+}
+
+// writeVerified streams r into rel under root atomically: it writes to a temp
+// file in rel's directory (so the final rename cannot cross filesystems),
+// hashing as it goes, and renames it over rel only if the digest matches
+// checksum (or checksum is empty). On any failure the temp file is removed
+// and rel is untouched. The rename replaces whatever is at rel, a symlink
+// included, rather than writing through it.
+func writeVerified(root *os.Root, rel string, r io.Reader, checksum string) (err error) {
+	tmpName, tmp, err := createTemp(root, rel)
 	if err != nil {
 		return fmt.Errorf("cinc: create temp file: %w", err)
 	}
@@ -338,11 +366,16 @@ func writeVerified(dest string, r io.Reader, checksum string) (err error) {
 		if err != nil {
 			// Best-effort cleanup; the failure being returned is the one
 			// the caller needs to see.
-			_ = os.Remove(tmp.Name())
+			_ = root.Remove(tmpName)
 		}
 	}()
 	h := newMD5()
 	_, err = io.Copy(io.MultiWriter(tmp, h), r)
+	if err == nil {
+		// Cookbook files are ordinary 0644 files whatever the umask. Chmod
+		// the open file, not the name, so nothing can swap it in between.
+		err = tmp.Chmod(0o644)
+	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -352,14 +385,20 @@ func writeVerified(dest string, r io.Reader, checksum string) (err error) {
 	if got := hex.EncodeToString(h.Sum(nil)); checksum != "" && !strings.EqualFold(got, checksum) {
 		return fmt.Errorf("cinc: checksum mismatch: got md5 %s, manifest lists %s", got, checksum)
 	}
-	// CreateTemp makes the file 0600; cookbook files are ordinary 0644 files.
-	if err = os.Chmod(tmp.Name(), 0o644); err == nil {
-		err = os.Rename(tmp.Name(), dest)
-	}
-	if err != nil {
+	if err = root.Rename(tmpName, rel); err != nil {
 		return fmt.Errorf("cinc: write file: %w", err)
 	}
 	return nil
+}
+
+// createTemp creates a new, empty file beside rel under root, named like
+// os.CreateTemp names one, and returns its name relative to root. The name
+// carries 60 random bits, so unlike os.CreateTemp it does not retry on a
+// clash; O_EXCL still refuses one rather than reuse another file.
+func createTemp(root *os.Root, rel string) (string, *os.File, error) {
+	name := filepath.Join(filepath.Dir(rel), "."+filepath.Base(rel)+"."+rand.Text()[:12]+".tmp")
+	f, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	return name, f, err
 }
 
 // manifestAPIVersion is the server API version the manifest PUT asks for.
