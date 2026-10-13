@@ -7,7 +7,7 @@ consumers of `github.com/cinc-project/cinc-api`.
 | Package | What it is | When it runs |
 |---|---|---|
 | `suite/` | Every test, written once against a `suite.Target` | — |
-| `cincserverng/` | Runs the suite against an in-memory [cinc-server-ng](https://github.com/cinc-project/cinc-server-ng) | Every CI job; `go test ./...` here (~2 s) |
+| `cincserverng/` | Runs the suite against an in-memory [cinc-server-ng](https://github.com/cinc-project/cinc-server-ng), twice: over plain HTTP and over HTTPS with the server serving TLS itself from a throwaway CA | Every CI job; `go test ./...` here (~2 s) |
 | `cincservererlang/` | Runs the suite against the CINC Server Erlang stack (erchef) in AWS | By hand, with `run-cinc-server-erlang.sh` |
 | `terraform/` | The AWS stack for `cincservererlang` | By hand, through the script |
 
