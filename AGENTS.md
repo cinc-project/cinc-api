@@ -62,27 +62,12 @@ commands and PR conventions).
 ## What the test doubles do not cover
 
 Both suites can be green while the wire contract is wrong. Known gaps, each
-of which has hidden a real bug (all re-checked against cinc-server-ng v0.14.0;
+of which has hidden a real bug (all re-checked against cinc-server-ng v0.16.0;
 file new ones at cinc-project/cinc-server-ng):
 
-- **cinc-server-ng** returns only `all_files` on a cookbook GET (never the
-  per-segment slices), accepts `run_list: null` on a node, and populates
-  both `name` and `groupname` on a group GET. A real Chef Server is stricter or shaped
-  differently on all three.
-- **cinc-server-ng** stores node and role run lists verbatim. erchef
-  normalizes them on every save (bare `nginx` becomes `recipe[nginx]`, then
-  exact duplicates are dropped; `chef_object_base:normalize_run_list`), so a
-  run list read back from a real server can differ from the one sent.
-  `NormalizeRunList` reproduces erchef's result client-side.
-- **cinc-server-ng** generates a client key on `POST /clients` even without
-  `create_key`. Real erchef under API v1 creates a keyless client (no
-  `chef_key` in the response, no `default` key) unless `create_key: true`
-  or `public_key` is sent.
-- **cinc-server-ng** generates a key on `POST /clients` and `POST /users`
-  even without `create_key`. Real erchef under API v1 creates a keyless
-  client or user (no `chef_key` in the response, no `default` key) unless
-  `create_key: true` or `public_key` is sent, which is why `Clients.Create`
-  and `Users.Create` send `create_key` whenever no public key is given.
+- **cinc-server-ng** accepts and stores `run_list: null` on a node, where a
+  real Chef Server is stricter. That is why `run_list` always serializes as
+  `[]`.
 - **cinc-server-ng** accepts `POST .../keys` with neither `create_key` nor
   `public_key` (it generates one) and without `expiration_date` (it stores
   `infinity`). erchef rejects both with a 400; `KeyScope.Create` fills them in.
@@ -93,29 +78,15 @@ file new ones at cinc-project/cinc-server-ng):
   cinc-server-ng answers a non-numeric requested version with a 400 whose
   header says `request_version`/`response_version` are the minimum, where
   erchef sends a 406 with both `-1`.
-- **cinc-server-ng** accepts a cookbook manifest with no `metadata` block,
-  with bare file names (`default.rb` instead of `recipes/default.rb`), and
-  with `all_files` at server API version 1. erchef rejects the first and
-  third with a 400 (`metadata.version` must equal the URL version;
-  `all_files` is only valid from API version 2, which is why the manifest
-  PUT asks for 2), and chef-client misfiles every entry under the second.
-- **Group PUT** differs too. erchef answers with the request body echoed
-  (members nested under `actors`, unresolvable names still in it) and keeps
-  any `actors` kind the body omits; cinc-server-ng answers with the stored
-  GET-shaped group (unknown names already dropped) and clears an omitted
-  kind. Both silently drop a name that resolves to nothing, which is why
-  `Groups.AddMembers` reads the group back. The flat `actors` array on a GET
-  is clients+users on erchef but every member on cinc-server-ng.
-- **cinc-server-ng** lets a non-superuser take the `admins` group off an
-  object's `grant` ACE; erchef refuses that with a 403 ("Admin group cannot
-  be removed from the Grant ACE"), not a 400.
-- **cinc-server-ng** lists every cookbook version on `GET /cookbooks` (and
-  an environment's `/cookbooks`) without `num_versions`, where erchef lists
-  one; accepts an invalid `num_versions` erchef rejects with a 400; and
-  honors `num_versions` on `GET /cookbooks/NAME`, which erchef ignores
-  (cinc-server-ng#212). The client validates `num_versions` and sorts and
-  trims every version list itself, so callers see erchef's semantics on
-  both; the raw-wire suite cases pin the server behaviour.
+- **cinc-server-ng** encodes `/_stats` JSON differently: numeric values where
+  erchef sends strings, labels as an array, histograms summarized on the
+  family (cinc-server-ng#243). `stats/get` is a gap there until it is fixed.
+- **Neither server** rejects a cookbook manifest with bare file names
+  (`default.rb` instead of `recipes/default.rb`), but chef-client misfiles
+  every such entry, so only a converge would show it.
+- **Neither server** reports a group member name that resolves to nothing:
+  both drop it silently, which is why `Groups.AddMembers` reads the group
+  back.
 - **cinctest** replays whatever body the test author wrote, so a fixture
   that encodes a wrong assumption about the server's response will happily
   confirm it forever.
