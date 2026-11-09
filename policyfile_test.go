@@ -109,10 +109,16 @@ func TestPushRevision_NoCookbooks(t *testing.T) {
 }
 
 func TestPushRevision_Errors(t *testing.T) {
-	c := newTestClient(t, cinctest.New(t).Server)
+	// The artifact list is the only request any of these may make.
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Body: `{}`})
+	c := newTestClient(t, srv.Server)
 	ctx := context.Background()
 
 	t.Run("cookbook lock without identifier", func(t *testing.T) {
+		// This one makes no request at all: the empty-identifier check runs
+		// before the artifact list.
+		c := newTestClient(t, cinctest.New(t).Server)
 		lock := []byte(`{"name":"p","cookbook_locks":{"base":{"version":"1.0.0"}}}`)
 		if _, _, err := c.Policies.PushRevision(ctx, lock, "prod", nil); err == nil {
 			t.Error("expected an error for a cookbook lock with no identifier")
@@ -328,6 +334,165 @@ func TestPushRevision_SkipsArtifactsTheServerHas(t *testing.T) {
 	}
 }
 
+func TestPushRevision_NoCookbookNeededForAnArtifactTheServerHas(t *testing.T) {
+	// A caller that asked MissingArtifacts first fetches only what the server
+	// lacks, so the cookbooks map has no entry (or a nil one) for an artifact
+	// the server already holds. The push skips it and uploads the rest.
+	const nginxID = "5555555555555555555555555555555555555555"
+	const baseID = "6666666666666666666666666666666666666666"
+	const aptID = "7777777777777777777777777777777777777777"
+	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
+		`"nginx":{"version":"1.0.0","identifier":"` + nginxID + `"},` +
+		`"apt":{"version":"1.0.0","identifier":"` + aptID + `"},` +
+		`"base":{"version":"1.0.0","identifier":"` + baseID + `"}}}`)
+
+	var uploaded []string
+	var associated bool
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts":
+			w.Write([]byte(`{
+				"nginx":{"url":"http://x/cookbook_artifacts/nginx","versions":[
+					{"url":"http://x/cookbook_artifacts/nginx/` + nginxID + `","identifier":"` + nginxID + `"}]},
+				"apt":{"url":"http://x/cookbook_artifacts/apt","versions":[
+					{"url":"http://x/cookbook_artifacts/apt/` + aptID + `","identifier":"` + aptID + `"}]}
+			}`))
+		case r.Method == "POST" && r.URL.Path == "/organizations/o/sandboxes":
+			w.WriteHeader(201)
+			w.Write([]byte(`{"sandbox_id":"sb1","checksums":{}}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/sandboxes/sb1":
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/organizations/o/cookbook_artifacts/"):
+			uploaded = append(uploaded, r.URL.Path)
+			w.Write([]byte(`{}`))
+		case r.Method == "PUT" && r.URL.Path == "/organizations/o/policy_groups/prod/policies/web":
+			associated = true
+			w.Write([]byte(`{"name":"web"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	c := newTestClient(t, srv.Server)
+	// nginx is omitted entirely; apt is present with a nil cookbook.
+	cookbooks := map[string]*LocalCookbook{"apt": nil, "base": pushTestCookbook(t, "base")}
+	res, _, err := c.Policies.PushRevision(context.Background(), lockJSON, "prod", cookbooks)
+	if err != nil {
+		t.Fatalf("PushRevision: %v", err)
+	}
+	if !slices.Equal(res.Uploaded, []string{"base"}) || !slices.Equal(res.AlreadyPresent, []string{"apt", "nginx"}) {
+		t.Errorf("result = %+v, want base uploaded and apt, nginx already present", res)
+	}
+	want := "/organizations/o/cookbook_artifacts/base/" + baseID
+	if len(uploaded) != 1 || uploaded[0] != want {
+		t.Errorf("uploaded %v, want only %s", uploaded, want)
+	}
+	if !associated {
+		t.Error("policy revision was not associated with the group")
+	}
+}
+
+func TestPushRevision_MissingArtifactWithoutACookbookSendsNothing(t *testing.T) {
+	// An artifact the server lacks still needs a cookbook. Every one is checked
+	// before the first upload, so a gap anywhere in the lock leaves the server
+	// untouched: no upload, no association.
+	const nginxID = "8888888888888888888888888888888888888888"
+	const baseID = "9999999999999999999999999999999999999999"
+	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
+		`"nginx":{"identifier":"` + nginxID + `"},` +
+		`"base":{"identifier":"` + baseID + `"}}}`)
+
+	srv := cinctest.New(t)
+	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	})
+
+	c := newTestClient(t, srv.Server)
+	// base sorts first and has a cookbook; nginx, missing on the server, has none.
+	cookbooks := map[string]*LocalCookbook{"base": pushTestCookbook(t, "base")}
+	_, _, err := c.Policies.PushRevision(context.Background(), lockJSON, "prod", cookbooks)
+	if err == nil {
+		t.Fatal("expected an error for a missing artifact with no cookbook")
+	}
+	for _, want := range []string{`"nginx"`, nginxID} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %s", err, want)
+		}
+	}
+}
+
+func TestPolicies_MissingArtifacts(t *testing.T) {
+	const nginxID = "1111111111111111111111111111111111111111"
+	lock := &PolicyRevision{Name: "web", CookbookLocks: map[string]CookbookLock{
+		"nginx": {Identifier: nginxID},
+		"zlib":  {Identifier: "z1"},
+		"base":  {Identifier: "b1"},
+	}}
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Body: `{
+		"nginx":{"url":"u","versions":[{"url":"u","identifier":"` + nginxID + `"}]},
+		"base":{"url":"u","versions":[{"url":"u","identifier":"old"}]}
+	}`})
+	c := newTestClient(t, srv.Server)
+
+	missing, resp, err := c.Policies.MissingArtifacts(context.Background(), lock)
+	if err != nil {
+		t.Fatalf("MissingArtifacts: %v", err)
+	}
+	if resp == nil || resp.StatusCode != 200 {
+		t.Errorf("response = %+v, want the 200", resp)
+	}
+	if !slices.Equal(missing, []string{"base", "zlib"}) {
+		t.Errorf("missing = %v, want [base zlib]", missing)
+	}
+}
+
+func TestPolicies_MissingArtifactsEdgeCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no cookbook locks makes no request", func(t *testing.T) {
+		c := newTestClient(t, cinctest.New(t).Server)
+		missing, _, err := c.Policies.MissingArtifacts(ctx, &PolicyRevision{Name: "web"})
+		if err != nil {
+			t.Fatalf("MissingArtifacts: %v", err)
+		}
+		if missing == nil || len(missing) != 0 {
+			t.Errorf("missing = %#v, want an empty, non-nil slice", missing)
+		}
+	})
+	t.Run("a lock without an identifier errors before any request", func(t *testing.T) {
+		c := newTestClient(t, cinctest.New(t).Server)
+		lock := &PolicyRevision{Name: "web", CookbookLocks: map[string]CookbookLock{"base": {Version: "1.0.0"}}}
+		if _, _, err := c.Policies.MissingArtifacts(ctx, lock); err == nil {
+			t.Error("expected an error for a cookbook lock with no identifier")
+		}
+	})
+	t.Run("a nil lock errors", func(t *testing.T) {
+		c := newTestClient(t, cinctest.New(t).Server)
+		if _, _, err := c.Policies.MissingArtifacts(ctx, nil); err == nil {
+			t.Error("expected an error for a nil lock")
+		}
+	})
+	t.Run("list failure", func(t *testing.T) {
+		srv := cinctest.New(t)
+		srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Status: 403, Body: `{"error":["forbidden"]}`})
+		c := newTestClient(t, srv.Server)
+		lock := &PolicyRevision{Name: "web", CookbookLocks: map[string]CookbookLock{"base": {Identifier: "b1"}}}
+		_, resp, err := c.Policies.MissingArtifacts(ctx, lock)
+		if !errors.Is(err, ErrForbidden) {
+			t.Fatalf("err = %v, want ErrForbidden", err)
+		}
+		if resp == nil || resp.StatusCode != 403 {
+			t.Errorf("response = %+v, want the 403", resp)
+		}
+	})
+}
+
 func TestPushRevision_ConflictMeansAlreadyUploaded(t *testing.T) {
 	// A concurrent push can upload the same artifact between our list and our
 	// PUT. The identifier is a content hash, so the server's 409 means the
@@ -521,8 +686,11 @@ func TestPushRevision_UploadsUnderTheLockName(t *testing.T) {
 }
 
 func TestPushRevision_RejectsACookbookThatDisagreesWithItsLock(t *testing.T) {
-	// Nothing may reach the server: the checks run before the artifact list.
-	c := newTestClient(t, cinctest.New(t).Server)
+	// Nothing but the artifact list may reach the server: the checks run after
+	// it (only cookbooks the server lacks are checked) and before any upload.
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Body: `{}`})
+	c := newTestClient(t, srv.Server)
 	ctx := context.Background()
 
 	t.Run("metadata names another cookbook", func(t *testing.T) {
