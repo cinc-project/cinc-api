@@ -189,16 +189,23 @@ type PushResult struct {
 }
 
 // PushRevision deploys a Policyfile lock to a policy group: it uploads each
-// cookbook the lock pins as a cookbook artifact (under the lock's name and
-// the identifier the lock records), then associates the resulting revision
-// with group. This is the server-side half of `chef push`.
+// cookbook the lock pins that the server lacks as a cookbook artifact (under
+// the lock's name and the identifier the lock records), then associates the
+// resulting revision with group. This is the server-side half of `chef push`.
 //
 // lockJSON is the raw Policyfile.lock.json; it is parsed (and validated, see
 // ParsePolicyfileLock) to discover the policy name and cookbook locks, and
-// sent verbatim to the server so no lock fields are lost. cookbooks maps each
-// cookbook-lock name to the on-disk cookbook to upload for it — callers fetch
-// these from the lock's sources first. The caller's LocalCookbooks are not
-// modified.
+// sent verbatim to the server so no lock fields are lost. A cookbook lock with
+// no identifier is an error before anything is sent.
+//
+// Chef Server rejects a PUT of an existing artifact identifier with 409, so,
+// like chef-cli, PushRevision lists the server's artifacts once and uploads
+// only the identifiers it lacks. cookbooks maps a cookbook-lock name to the
+// on-disk cookbook to upload for it, and needs an entry only for the locks
+// whose artifacts the server lacks: one the server already holds may be
+// missing or nil, so a caller can ask MissingArtifacts first and fetch only
+// those cookbooks from the lock's sources. A lock the server lacks with no
+// cookbook supplied is an error. The caller's LocalCookbooks are not modified.
 //
 // Each artifact is uploaded under its cookbook-lock name, since that is the
 // name chef-client resolves the lock's run list against. A cookbook whose
@@ -206,52 +213,45 @@ type PushResult struct {
 // none) is renamed to the lock's; one whose name or metadata name is a
 // different cookbook is an error, as is one whose version differs from the
 // lock's, since the lock would then pin an artifact that is not the cookbook
-// it describes. All of this is checked before anything is sent.
+// it describes. Every cookbook to be uploaded is checked after the artifact
+// list and before the first upload, so a failed check changes nothing on the
+// server.
 //
-// Chef Server rejects a PUT of an existing artifact identifier with 409, so,
-// like chef-cli, PushRevision lists the server's artifacts once and uploads
-// only the identifiers it lacks; a 409 from a concurrent pusher is treated as
-// already present, since the identifier is a content hash. The PushResult
-// says which were which. The artifact uploads and the group association are
-// not atomic, but this makes a failed push safe to retry and lets one lock be
-// pushed to several groups.
+// A 409 from a concurrent pusher is treated as already present, since the
+// identifier is a content hash. The PushResult says which were which. The
+// artifact uploads and the group association are not atomic, but this makes
+// a failed push safe to retry and lets one lock be pushed to several groups.
 func (s *PoliciesService) PushRevision(ctx context.Context, lockJSON []byte, group string, cookbooks map[string]*LocalCookbook) (*PushResult, *Response, error) {
 	lock, err := ParsePolicyfileLock(lockJSON)
 	if err != nil {
 		return nil, nil, err
 	}
-	names := sortedKeys(lock.CookbookLocks)
-	artifacts := make(map[string]*LocalCookbook, len(names))
-	for _, name := range names {
+	missing, present, _, err := s.partitionArtifacts(ctx, lock)
+	if err != nil {
+		return nil, nil, err
+	}
+	artifacts := make(map[string]*LocalCookbook, len(missing))
+	for _, name := range missing {
 		a, err := lockArtifact(name, lock.CookbookLocks[name], cookbooks[name])
 		if err != nil {
 			return nil, nil, err
 		}
 		artifacts[name] = a
 	}
-	result := &PushResult{Uploaded: []string{}, AlreadyPresent: []string{}}
-	if len(names) > 0 {
-		remote, _, err := s.client.CookbookArtifacts.List(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("cinc: list cookbook artifacts: %w", err)
-		}
-		for _, name := range names {
-			id := lock.CookbookLocks[name].Identifier
-			if remote[name].Has(id) {
-				result.AlreadyPresent = append(result.AlreadyPresent, name)
-				continue
-			}
-			err := s.client.CookbookArtifacts.Upload(ctx, artifacts[name], id)
-			switch {
-			case errors.Is(err, ErrConflict):
-				result.AlreadyPresent = append(result.AlreadyPresent, name)
-			case err != nil:
-				return nil, nil, fmt.Errorf("cinc: push %s (%s): %w", name, id, err)
-			default:
-				result.Uploaded = append(result.Uploaded, name)
-			}
+	result := &PushResult{Uploaded: []string{}, AlreadyPresent: present}
+	for _, name := range missing {
+		id := lock.CookbookLocks[name].Identifier
+		err := s.client.CookbookArtifacts.Upload(ctx, artifacts[name], id)
+		switch {
+		case errors.Is(err, ErrConflict):
+			result.AlreadyPresent = append(result.AlreadyPresent, name)
+		case err != nil:
+			return nil, nil, fmt.Errorf("cinc: push %s (%s): %w", name, id, err)
+		default:
+			result.Uploaded = append(result.Uploaded, name)
 		}
 	}
+	sort.Strings(result.AlreadyPresent)
 	rev, resp, err := s.client.PolicyGroups.PutPolicy(ctx, group, lock.Name, json.RawMessage(lockJSON))
 	if err != nil {
 		return nil, resp, err
@@ -260,15 +260,54 @@ func (s *PoliciesService) PushRevision(ctx context.Context, lockJSON []byte, gro
 	return result, resp, nil
 }
 
-// lockArtifact returns a copy of cb to upload for the cookbook lock name,
-// named after the lock, or an error if cb is missing or is not the cookbook
-// the lock describes (see PushRevision).
-func lockArtifact(name string, cl CookbookLock, cb *LocalCookbook) (*LocalCookbook, error) {
-	if cl.Identifier == "" {
-		return nil, fmt.Errorf("cinc: cookbook lock %q has no identifier", name)
+// MissingArtifacts returns the sorted names of lock's cookbook locks whose
+// artifacts the server does not hold under the locked identifier: the
+// cookbooks a caller must fetch and pass to PushRevision. It lists the
+// server's artifacts once, and makes no request for a lock with no cookbook
+// locks. A cookbook lock with no identifier is an error before any request.
+// The slice is never nil when err is nil.
+func (s *PoliciesService) MissingArtifacts(ctx context.Context, lock *PolicyRevision) ([]string, *Response, error) {
+	missing, _, resp, err := s.partitionArtifacts(ctx, lock)
+	return missing, resp, err
+}
+
+// partitionArtifacts splits lock's cookbook-lock names, sorted, into those
+// whose artifacts the server lacks and those it already holds. Both slices
+// are non-nil on success.
+func (s *PoliciesService) partitionArtifacts(ctx context.Context, lock *PolicyRevision) (missing, present []string, resp *Response, err error) {
+	if lock == nil {
+		return nil, nil, nil, errors.New("cinc: no Policyfile lock supplied")
 	}
+	names := sortedKeys(lock.CookbookLocks)
+	for _, name := range names {
+		if lock.CookbookLocks[name].Identifier == "" {
+			return nil, nil, nil, fmt.Errorf("cinc: cookbook lock %q has no identifier", name)
+		}
+	}
+	missing, present = []string{}, []string{}
+	if len(names) == 0 {
+		return missing, present, nil, nil
+	}
+	remote, resp, err := s.client.CookbookArtifacts.List(ctx)
+	if err != nil {
+		return nil, nil, resp, fmt.Errorf("cinc: list cookbook artifacts: %w", err)
+	}
+	for _, name := range names {
+		if remote[name].Has(lock.CookbookLocks[name].Identifier) {
+			present = append(present, name)
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	return missing, present, resp, nil
+}
+
+// lockArtifact returns a copy of cb to upload for the cookbook lock name,
+// whose artifact the server lacks, named after the lock, or an error if cb is
+// missing or is not the cookbook the lock describes (see PushRevision).
+func lockArtifact(name string, cl CookbookLock, cb *LocalCookbook) (*LocalCookbook, error) {
 	if cb == nil {
-		return nil, fmt.Errorf("cinc: no cookbook supplied for lock %q", name)
+		return nil, fmt.Errorf("cinc: the server has no artifact %s for cookbook lock %q, and no cookbook was supplied to upload for it", cl.Identifier, name)
 	}
 	a := *cb
 	if !a.nameFromDir {

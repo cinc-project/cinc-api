@@ -40,7 +40,7 @@ following endpoint families are implemented:
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
 | `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Modify / Delete                       |
 | `c.Orgs`             | `/organizations` (top-level)          | List / Get / Create / Update / Delete                                |
-| `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision |
+| `c.Policies`         | `/policies`                           | List / Get / Delete / GetRevision / CreateRevision / DeleteRevision / PushRevision / MissingArtifacts |
 | `c.PolicyGroups`     | `/policy_groups`                      | List / Get / Delete / GetPolicy / PutPolicy / DeletePolicy           |
 | `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
@@ -169,10 +169,15 @@ model, so callers don't re-encode server conventions:
   then associate the revision with a policy group. The lock bytes are sent
   verbatim so no fields are lost. Artifacts the server already has are
   skipped, so the same lock can be pushed to several groups and a failed push
-  can be retried. It returns a `PushResult`: the `Revision`, and the sorted
+  can be retried. `cookbooks` needs an entry only for the artifacts the
+  server lacks; a lock with no cookbook is an error only if the server lacks
+  its artifact. It returns a `PushResult`: the `Revision`, and the sorted
   lock names it `Uploaded` and found `AlreadyPresent`. A cookbook whose
   metadata names a different cookbook, or whose version differs from the
-  lock's, is refused before anything is sent.
+  lock's, is refused before anything is uploaded.
+- `Policies.MissingArtifacts(lock)`: the sorted cookbook-lock names whose
+  artifacts the server lacks, so a caller fetches only those cookbooks
+  before `PushRevision`.
 - `LoadChefignore(dir)` / `Chefignore.Ignores(relPath)` — Chef's chefignore
   handling: the nearest `chefignore` in `dir` or any parent (so a chef-repo's
   `cookbooks/chefignore` applies), with each pattern matched against the
