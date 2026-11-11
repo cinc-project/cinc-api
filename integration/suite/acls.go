@@ -267,4 +267,7 @@ func testRevokeKeepsAdminsOnGrant(t *testing.T, _ Target, c *cinc.Client) {
 		t.Errorf("changed = %v, want nil", changed)
 	}
 	wantStatus(t, err, http.StatusForbidden)
+	if !errors.Is(err, cinc.ErrAdminsRequiredOnGrant) {
+		t.Errorf("errors.Is(err, ErrAdminsRequiredOnGrant) = false: %v", err)
+	}
 }
