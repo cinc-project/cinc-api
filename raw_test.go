@@ -190,3 +190,19 @@ func TestClientFetch_RetriesTruncatedBodyWithFreshReader(t *testing.T) {
 		t.Fatalf("calls = %d, handler saw %q", calls, got)
 	}
 }
+
+// Do builds the URL as server URL + path, so a path that does not start with
+// a single "/" could move the signed request to another host
+// ("@evil.example/x", "//evil.example/x", ".evil.example/x").
+func TestClientDo_RejectsPathThatCouldChangeHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("request reached the server: %s %s", r.Method, r.URL)
+	}))
+	t.Cleanup(srv.Close)
+	c := newTestClient(t, srv)
+	for _, p := range []string{"", "users", "@evil.example/x", "//evil.example/x", ".evil.example/x", ":8443/x"} {
+		if _, _, err := c.Do(context.Background(), "GET", p, nil); err == nil || !strings.Contains(err.Error(), "path") {
+			t.Errorf("Do(%q) err = %v, want a path error", p, err)
+		}
+	}
+}

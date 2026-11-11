@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Do sends a signed request to path and returns the response body exactly as
@@ -19,7 +20,14 @@ import (
 // typed services do. A non-2xx response returns the body and the Response
 // alongside an *ErrorResponse, so errors.Is(err, ErrNotFound) and friends
 // work as usual.
+//
+// path must start with a single "/": the request URL is the server URL with
+// path appended, and anything else ("@host/x", "//host/x") could send the
+// signed request to a different host.
 func (c *Client) Do(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return nil, nil, fmt.Errorf("cinc: Do: path %q must start with a single \"/\"", path)
+	}
 	return c.doRaw(ctx, method, path, body)
 }
 
