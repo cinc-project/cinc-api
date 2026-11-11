@@ -95,6 +95,7 @@ var cases = []testCase{
 	{"search/all-pages", testSearchAllPages},
 	{"search/partial-paths-unwrap", testSearchPartialPathsUnwrap},
 	{"search/nodes", testSearchNodes},
+	{"search/partial-nodes", testSearchPartialNodes},
 	{"search/data-bag-items", testSearchDataBagItems},
 	{"required-recipe/get", testRequiredRecipe},
 	{"license/get", testLicense},

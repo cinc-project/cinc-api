@@ -45,7 +45,7 @@ following endpoint families are implemented:
 | `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
 | `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete / Environments / EnvironmentRunList |
-| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`/`WithPartialPaths`), `All` (`iter.Seq2` over rows, one page in memory at a time), `Nodes` (rows decoded as `*Node`), `DataBagItems` (rows unwrapped to `DataBagItem`), `SearchAll`, `Indexes` |
+| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`/`WithPartialPaths`), `All` (`iter.Seq2` over rows, one page in memory at a time), `Nodes` (rows decoded as `*Node`), `PartialNodes` (a partial search yielding `*PartialNode`: name plus the projected paths, with `Scalar`/`LastCheckin`), `DataBagItems` (rows unwrapped to `DataBagItem`), `SearchAll`, `Indexes` |
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
