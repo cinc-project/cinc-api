@@ -331,11 +331,23 @@ func (s *ACLsService) Grant(ctx context.Context, t ACLTarget, perm string, actor
 // returned in order (nil if none held any).
 //
 // erchef refuses to take the admins group off the grant permission unless the
-// caller is the superuser, with a 403 (ErrForbidden) that has nothing to do
-// with the caller's own grant permission.
+// caller is the superuser, with a 403 that has nothing to do with the
+// caller's own grant permission. Revoke reports that refusal as an error
+// matching both ErrAdminsRequiredOnGrant and ErrForbidden.
 func (s *ACLsService) Revoke(ctx context.Context, t ACLTarget, perm string, actors, groups []string) (changed []string, err error) {
 	return s.change(ctx, t, perm, actors, groups, (*ACE).RemoveMembers)
 }
+
+// adminsRequiredOnGrant wraps the server's 403 for a write that dropped the
+// admins group from grant, so it matches ErrAdminsRequiredOnGrant as well as
+// everything the server error matches.
+type adminsRequiredOnGrant struct{ err error }
+
+func (e adminsRequiredOnGrant) Error() string {
+	return e.err.Error() + " (only the superuser may remove the admins group from grant)"
+}
+
+func (e adminsRequiredOnGrant) Unwrap() []error { return []error{ErrAdminsRequiredOnGrant, e.err} }
 
 // change is the read-modify-write behind Grant and Revoke. edit applies the
 // member change to one ACE and reports whether it changed anything.
@@ -356,10 +368,17 @@ func (s *ACLsService) change(ctx context.Context, t ACLTarget, perm string, acto
 	var changed []string
 	for _, p := range perms {
 		ace, _ := acl.ACEFor(p) // p comes from ExpandPerm, so it is valid
+		hadAdmins := slices.Contains(ace.Groups, "admins")
 		if !edit(ace, actors, groups) {
 			continue
 		}
 		if err := s.setACL(ctx, base, p, ace); err != nil {
+			// erchef checks this constraint before authorization, so a 403
+			// for a write that drops admins from grant is the constraint,
+			// whatever the caller's own permissions.
+			if p == "grant" && hadAdmins && !slices.Contains(ace.Groups, "admins") && errors.Is(err, ErrForbidden) {
+				err = adminsRequiredOnGrant{err}
+			}
 			return changed, &ACLChangeError{Target: t, Perm: p, Changed: slices.Clone(changed), Err: err}
 		}
 		changed = append(changed, p)

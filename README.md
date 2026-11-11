@@ -258,7 +258,9 @@ model, so callers don't re-encode server conventions:
   or `"all"`, read the ACL once, write only the permissions that change, and
   return those; a write that fails part way returns the permissions already
   changed and an `*ACLChangeError` naming the one that failed. A member the
-  server cannot resolve is a 400, `ErrBadRequest`.
+  server cannot resolve is a 400, `ErrBadRequest`. erchef's refusal to take
+  the admins group off `grant` (only the superuser may) matches
+  `ErrAdminsRequiredOnGrant` as well as `ErrForbidden`.
 
 ## License
 

@@ -309,3 +309,85 @@ func TestACLs_GrantRevokeValidateFirst(t *testing.T) {
 		t.Error("Grant(empty members) returned nil error")
 	}
 }
+
+// refusingServer serves acl as web01's ACL and answers the PUT of failPerm
+// with status; every other PUT succeeds.
+func refusingServer(t *testing.T, acl, failPerm string, status int) *Client {
+	t.Helper()
+	const base = "/organizations/o/nodes/web01"
+	srv := cinctest.New(t)
+	srv.Handle("GET "+base+"/_acl", cinctest.Route{Body: acl})
+	for _, p := range ACLPerms {
+		r := cinctest.Route{Body: `{}`}
+		if p == failPerm {
+			r = cinctest.Route{Status: status, Body: `{"error":["refused"]}`}
+		}
+		srv.Handle("PUT "+base+"/_acl/"+p, r)
+	}
+	return newTestClient(t, srv.Server)
+}
+
+// erchef refuses to take admins off grant for anyone but the superuser, with
+// a 403 that is not about the caller's permissions. Revoke reports it as
+// ErrAdminsRequiredOnGrant, still wrapping ErrForbidden and the server error.
+func TestACLs_RevokeAdminsFromGrantIsAdminsRequiredOnGrant(t *testing.T) {
+	for _, perm := range []string{"grant", "all"} {
+		c := refusingServer(t, aclBody, "grant", 403)
+		_, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), perm, nil, []string{"admins"})
+		if !errors.Is(err, ErrAdminsRequiredOnGrant) {
+			t.Errorf("Revoke(%s): errors.Is(err, ErrAdminsRequiredOnGrant) = false: %v", perm, err)
+		}
+		if !errors.Is(err, ErrForbidden) {
+			t.Errorf("Revoke(%s): errors.Is(err, ErrForbidden) = false", perm)
+		}
+		var er *ErrorResponse
+		if !errors.As(err, &er) || er.StatusCode != 403 {
+			t.Errorf("Revoke(%s): errors.As ErrorResponse = %+v", perm, er)
+		}
+		var ce *ACLChangeError
+		if !errors.As(err, &ce) || ce.Perm != "grant" {
+			t.Errorf("Revoke(%s): err = %#v, want an ACLChangeError on grant", perm, err)
+		}
+	}
+}
+
+// Only a 403 for a write that dropped admins from grant is that refusal.
+func TestACLs_OtherFailuresAreNotAdminsRequiredOnGrant(t *testing.T) {
+	const withDevs = `{
+	"create":{"actors":[],"groups":["admins"]},
+	"read":{"actors":[],"groups":["admins"]},
+	"update":{"actors":[],"groups":["admins"]},
+	"delete":{"actors":[],"groups":["admins"]},
+	"grant":{"actors":["bob"],"groups":["admins","devs"]}
+}`
+	ctx := context.Background()
+	target := ObjectACL(ACLNodes, "web01")
+	for _, tc := range []struct {
+		name           string
+		failPerm       string
+		status         int
+		revoke         bool
+		actors, groups []string
+	}{
+		{"revoke admins from grant, 400", "grant", 400, true, nil, []string{"admins"}},
+		{"revoke admins from read, 403", "read", 403, true, nil, []string{"admins"}},
+		{"revoke devs from grant, 403", "grant", 403, true, nil, []string{"devs"}},
+		{"revoke bob from grant, 403", "grant", 403, true, []string{"bob"}, nil},
+		{"grant carol on grant, 403", "grant", 403, false, []string{"carol"}, nil},
+	} {
+		c := refusingServer(t, withDevs, tc.failPerm, tc.status)
+		var err error
+		if tc.revoke {
+			_, err = c.ACLs.Revoke(ctx, target, tc.failPerm, tc.actors, tc.groups)
+		} else {
+			_, err = c.ACLs.Grant(ctx, target, tc.failPerm, tc.actors, tc.groups)
+		}
+		if err == nil {
+			t.Errorf("%s: no error; the case sent nothing", tc.name)
+			continue
+		}
+		if errors.Is(err, ErrAdminsRequiredOnGrant) {
+			t.Errorf("%s: wrongly reported as ErrAdminsRequiredOnGrant: %v", tc.name, err)
+		}
+	}
+}

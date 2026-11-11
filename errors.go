@@ -17,6 +17,12 @@ var (
 	// naming something that does not exist, such as an unknown actor or group
 	// in an ACL write.
 	ErrBadRequest = errors.New("cinc: bad request")
+	// ErrAdminsRequiredOnGrant is erchef refusing to take the admins group
+	// off an object's grant permission, which only the superuser may do. The
+	// server answers 403, so the error also matches ErrForbidden, but it says
+	// nothing about the caller's own grant permission: erchef checks this
+	// rule before it checks authorization. ACLs.Revoke reports it.
+	ErrAdminsRequiredOnGrant = errors.New("cinc: the admins group cannot be removed from the grant permission")
 )
 
 // ErrorResponse describes a non-2xx response from the Chef server.
