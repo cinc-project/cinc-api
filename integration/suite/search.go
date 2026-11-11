@@ -191,6 +191,54 @@ func testSearchNodes(t *testing.T, _ Target, c *cinc.Client) {
 	})
 }
 
+// testSearchPartialNodes reads a few fields of a node through
+// Search.PartialNodes: a normal attribute and an automatic one, both
+// addressed in the merged view, and ohai_time for LastCheckin.
+func testSearchPartialNodes(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	marker := randomHex(t, 8)
+	name := uniqueName(t, "node")
+	cleanup(t, "node "+name, func(ctx context.Context) error {
+		_, err := c.Nodes.Delete(ctx, name)
+		return err
+	})
+	node := &cinc.Node{
+		Name: name, RunList: []string{},
+		Normal:    cinc.Attributes{"search_marker": marker, "app": map[string]any{"version": "1.2.3"}},
+		Automatic: cinc.Attributes{"ohai_time": 1700000000.25, "platform": "ubuntu"},
+	}
+	if _, err := c.Nodes.Create(ctx, node); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	eventually(t, 30*time.Second, func() error {
+		var got []*cinc.PartialNode
+		for n, err := range c.Search.PartialNodes(ctx, "search_marker:"+marker, []string{"app.version", "platform", "ohai_time"}) {
+			if err != nil {
+				return err
+			}
+			got = append(got, n)
+		}
+		if len(got) != 1 {
+			return fmt.Errorf("Search.PartialNodes returned %d rows, want 1", len(got))
+		}
+		n := got[0]
+		if n.Name != name {
+			return fmt.Errorf("name = %q, want %q (url %q)", n.Name, name, n.URL)
+		}
+		if v, _ := n.Scalar("app.version"); v != "1.2.3" {
+			return fmt.Errorf("app.version = %q, want 1.2.3 (data %v)", v, n.Data)
+		}
+		if v, _ := n.Scalar("platform"); v != "ubuntu" {
+			return fmt.Errorf("platform = %q, want ubuntu (data %v)", v, n.Data)
+		}
+		if at, ok := n.LastCheckin(); !ok || !at.Equal(time.Unix(1700000000, 250_000_000)) {
+			return fmt.Errorf("LastCheckin = %v, %v (data %v)", at, ok, n.Data)
+		}
+		return nil
+	})
+}
+
 // testSearchDataBagItems searches a data bag. A full search returns each item
 // wrapped as a Chef::DataBagItem; Search.DataBagItems yields the items
 // themselves, whole or projected.

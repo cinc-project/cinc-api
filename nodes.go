@@ -113,8 +113,15 @@ func (n *Node) EnvironmentName() string {
 // json.Number, int, int64) and reports false when the attribute is absent,
 // not a number, or not positive, as on a node that has never checked in.
 func (n *Node) LastCheckin() (time.Time, bool) {
+	return checkinTime(n.Automatic["ohai_time"])
+}
+
+// checkinTime reads an ohai_time value: Unix seconds in any JSON-decoded
+// numeric shape (float64, json.Number, int, int64). It reports false for
+// anything else and for a value that is not positive.
+func checkinTime(value any) (time.Time, bool) {
 	var secs float64
-	switch v := n.Automatic["ohai_time"].(type) {
+	switch v := value.(type) {
 	case float64:
 		secs = v
 	case json.Number:
