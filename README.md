@@ -50,6 +50,7 @@ following endpoint families are implemented:
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
 | `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / SetPassword / Authenticate   |
+| `c.Do` / `c.Fetch`   | any path / any URL                    | `Do` sends a signed request to an absolute path and returns the body byte-for-byte (no decode); `WithServerAPIVersion(ctx, v)` picks the API version per request. `Fetch` makes an unsigned GET (e.g. a bookshelf URL) and hands the body to a callback, retrying a truncated body with a fresh reader |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithRootCAs`, `WithMaxRetries`,
