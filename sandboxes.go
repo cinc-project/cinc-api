@@ -55,27 +55,64 @@ func (c *Client) commitSandbox(ctx context.Context, id string) (*Response, error
 // checksum and pinned by Content-MD5, so a repeated PUT can only store the
 // same bytes again. Each attempt reopens the file and sends it from the start.
 func (c *Client) uploadFile(ctx context.Context, uploadURL string, f cookbookFile) error {
-	sum, err := md5HexToBase64(f.checksum)
+	return c.putTransfer(ctx, uploadURL, f.checksum, func() (io.ReadCloser, int64, error) {
+		body, size, err := openUploadBody(f.path)
+		if err != nil {
+			return nil, 0, fmt.Errorf("cinc: open upload: %w", err)
+		}
+		return body, size, nil
+	})
+}
+
+// Upload PUTs a file to a pre-signed sandbox upload URL, the second step of
+// the sandbox flow after a signed POST to /sandboxes (send that with Do). It
+// is the counterpart of Fetch for callers that hold file contents somewhere
+// other than a cookbook directory, such as a backup archive.
+//
+// The request is not Chef-signed. It carries Content-Type
+// application/x-binary, Content-MD5 from checksum (the file's hex MD5, as the
+// sandbox lists it) and an explicit Content-Length of size, since an
+// S3-backed bookshelf rejects a chunked body. open returns the body from the
+// start; it is called once per attempt, because transient failures are
+// retried like cookbook uploads, and again if a redirect needs the body
+// resent. A body whose digest is not checksum is rejected by the server.
+func (c *Client) Upload(ctx context.Context, url, checksum string, size int64, open func() (io.ReadCloser, error)) error {
+	return c.putTransfer(ctx, url, checksum, func() (io.ReadCloser, int64, error) {
+		body, err := open()
+		if err != nil {
+			return nil, 0, fmt.Errorf("cinc: open upload: %w", err)
+		}
+		if size == 0 {
+			_ = body.Close()
+			return http.NoBody, 0, nil
+		}
+		return body, size, nil
+	})
+}
+
+// putTransfer is the unsigned, retried PUT behind uploadFile and Upload. open
+// returns a fresh body and its length for each attempt.
+func (c *Client) putTransfer(ctx context.Context, uploadURL, checksum string, open func() (io.ReadCloser, int64, error)) error {
+	sum, err := md5HexToBase64(checksum)
 	if err != nil {
 		return fmt.Errorf("cinc: upload checksum: %w", err)
 	}
 	return c.doTransfer(ctx, func() (*http.Request, error) {
-		body, size, err := openUploadBody(f.path)
+		body, size, err := open()
 		if err != nil {
-			return nil, fmt.Errorf("cinc: open upload: %w", err)
+			return nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, body)
 		if err != nil {
 			_ = body.Close() // read-only
 			return nil, fmt.Errorf("cinc: build upload request: %w", err)
 		}
-		// net/http cannot size a file body itself and would send it chunked,
-		// which S3-backed bookshelves reject; the length must be explicit.
-		// GetBody lets a redirected PUT (S3 issues 307s) resend the body, as a
-		// bytes.Reader body did implicitly.
+		// net/http cannot size an arbitrary body itself and would send it
+		// chunked, which S3-backed bookshelves reject; the length must be
+		// explicit. GetBody lets a redirected PUT (S3 issues 307s) resend it.
 		req.ContentLength = size
 		req.GetBody = func() (io.ReadCloser, error) {
-			b, _, err := openUploadBody(f.path)
+			b, _, err := open()
 			return b, err
 		}
 		req.Header.Set("Content-Type", "application/x-binary")
