@@ -9,7 +9,7 @@ go 1.27.1
 
 require (
 	github.com/cinc-project/cinc-api v0.0.0
-	github.com/cinc-project/cinc-server-ng v0.18.0
+	github.com/cinc-project/cinc-server-ng v0.20.2
 )
 
 require (
@@ -22,7 +22,7 @@ require (
 	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.61.0 // indirect
+	modernc.org/sqlite v1.61.1 // indirect
 )
 
 replace github.com/cinc-project/cinc-api => ../
