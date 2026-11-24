@@ -5,11 +5,11 @@
 // root module's ./... by virtue of having its own go.mod.
 module github.com/cinc-project/cinc-api/integration
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/cinc-project/cinc-api v0.0.0
-	github.com/cinc-project/cinc-server-ng v0.20.2
+	github.com/cinc-project/cinc-server-ng v0.21.0
 )
 
 require (
@@ -19,10 +19,10 @@ require (
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.61.1 // indirect
+	modernc.org/sqlite v1.62.0 // indirect
 )
 
 replace github.com/cinc-project/cinc-api => ../
