@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Sentinel errors for use with errors.Is.
@@ -113,9 +114,25 @@ func newErrorResponse(method, path string, code int, body []byte) *ErrorResponse
 		}
 	}
 	if len(er.Messages) == 0 && len(body) > 0 {
-		er.Messages = []string{strings.TrimSpace(string(body))}
+		er.Messages = []string{truncate(strings.TrimSpace(string(body)), maxRawErrorBody)}
 	}
 	return er
+}
+
+// maxRawErrorBody caps an error body that is not a Chef error document (a
+// proxy's HTML page, say), so it cannot bloat an error message or a log.
+const maxRawErrorBody = 512
+
+// truncate returns s cut to at most n bytes, on a rune boundary, with an
+// ellipsis when anything was cut.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 // errorText returns the text of one element of an erchef "error" value: a

@@ -13,6 +13,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,9 @@ const maxBackoff = 10 * time.Second
 // Every attempt goes through doOnce, so a retry resends the same body and is
 // signed afresh with a new timestamp.
 func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
+	if err := checkPathSegments(path); err != nil {
+		return nil, nil, err
+	}
 	for attempt := 0; ; attempt++ {
 		data, resp, err := c.doOnce(ctx, method, path, body)
 		status := 0
@@ -66,6 +70,21 @@ func giveUp(ctx context.Context, err error) error {
 		return fmt.Errorf("cinc: gave up retrying: %w (last attempt: %w)", ctxErr, err)
 	}
 	return err
+}
+
+// checkPathSegments refuses a request path (before any query) with an empty,
+// "." or ".." segment. Every one comes from an empty or dot name, and none is
+// harmless: the server's router drops an empty trailing segment, so DELETE
+// /data/<bag>/ (an empty item id) would delete the whole bag, and a dot
+// segment names a different object to any proxy that normalizes the path.
+func checkPathSegments(path string) error {
+	p, _, _ := strings.Cut(path, "?")
+	for seg := range strings.SplitSeq(strings.TrimPrefix(p, "/"), "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("cinc: request path %q has an empty, \".\" or \"..\" path segment; is a name empty?", path)
+		}
+	}
+	return nil
 }
 
 // retryable reports whether a signed request that ended with status and err
@@ -171,12 +190,36 @@ func (c *Client) transferOnce(newReq func() (*http.Request, error), handle func(
 		}
 		return 0, nil, &transportErr{fmt.Errorf("cinc: bookshelf %s: %w", req.Method, err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain what a handler left unread (it may stop early on a
+		// checksum mismatch), so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, resp.Header, newErrorResponse(req.Method, redactQuery(req.URL), resp.StatusCode, body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		er := newErrorResponse(req.Method, redactQuery(req.URL), resp.StatusCode, nil)
+		er.Messages = transferErrorMessages(body)
+		return resp.StatusCode, resp.Header, er
 	}
 	return resp.StatusCode, resp.Header, handle(resp)
+}
+
+// s3ErrorRE picks the Code and Message out of an S3 (or bookshelf) XML error.
+var s3ErrorRE = regexp.MustCompile(`(?s)<Code>(.*?)</Code>.*?<Message>(.*?)</Message>`)
+
+// transferErrorMessages is what an error from a pre-signed URL reports of its
+// body. An S3 error can echo the request's credentials (SignatureDoesNotMatch
+// includes the canonical request, the access key and the signature), so only
+// its Code and Message are kept; any other body is capped like an API one.
+func transferErrorMessages(body []byte) []string {
+	if m := s3ErrorRE.FindSubmatch(body); m != nil {
+		return []string{string(m[1]) + ": " + string(m[2])}
+	}
+	if s := strings.TrimSpace(string(body)); s != "" {
+		return []string{truncate(s, maxRawErrorBody)}
+	}
+	return nil
 }
 
 // redactQuery returns u without its query string, which for a pre-signed
@@ -359,6 +402,12 @@ func do[T any](ctx context.Context, c *Client, method, path string, body any) (T
 	data, resp, err := c.doRaw(ctx, method, path, encoded)
 	if err != nil {
 		return zero, resp, err
+	}
+	// Every Chef GET answers with a JSON document. An empty or null one
+	// (from a misbehaving proxy or cache) would otherwise decode as an empty
+	// object, which a read-modify-write would then write back.
+	if method == http.MethodGet && (len(bytes.TrimSpace(data)) == 0 || string(bytes.TrimSpace(data)) == "null") {
+		return zero, resp, fmt.Errorf("cinc: GET %s: empty response body", path)
 	}
 	var out T
 	if len(data) > 0 {

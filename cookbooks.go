@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -360,6 +361,19 @@ func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, dest
 		}
 		jobs[i] = fileDownload{url: ref.URL, rel: rel, path: ref.Path, checksum: ref.Checksum}
 	}
+	// Two entries that land on one file would race two writers onto it, one
+	// silently winning: refuse them before anything is written.
+	seen := make(map[string]string, len(jobs))
+	for _, j := range jobs {
+		key := filepath.Clean(j.rel)
+		if caseInsensitiveFS() {
+			key = strings.ToLower(key)
+		}
+		if other, dup := seen[key]; dup {
+			return fmt.Errorf("cinc: cookbook manifest paths %q and %q are the same file on this system", other, j.path)
+		}
+		seen[key] = j.path
+	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("cinc: create dirs: %w", err)
 	}
@@ -381,6 +395,13 @@ func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, dest
 		}
 		return nil
 	})
+}
+
+// caseInsensitiveFS reports whether this platform's default filesystems fold
+// case (macOS's APFS and HFS+, Windows's NTFS), so that paths differing only
+// in case are one file.
+func caseInsensitiveFS() bool {
+	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 }
 
 // downloadFile GETs a pre-signed bookshelf URL (no Chef signing) and writes
