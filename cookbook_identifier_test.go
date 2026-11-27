@@ -136,7 +136,7 @@ func TestLocalCookbook_IdentifiersCountInCookbookSymlinks(t *testing.T) {
 	}
 }
 
-// SkipChefignore keeps the files chefignore would drop, including a broken
+// WithSkipChefignore keeps the files chefignore would drop, including a broken
 // or unreadable chefignore's cookbook, and changes nothing else: root
 // dot-directories, the chef-zero sentinel and out-of-cookbook symlinks are
 // still skipped.
@@ -172,13 +172,13 @@ func TestLocalCookbookFromDir_SkipChefignore(t *testing.T) {
 		t.Fatalf("default: got %v, want %v", got, want)
 	}
 
-	skipped, err := LocalCookbookFromDir(root, "", SkipChefignore())
+	skipped, err := LocalCookbookFromDir(root, "", WithSkipChefignore())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"chefignore", "files/.hidden/keep", "metadata.rb", "recipes/default.rb.bak", "tmp/scratch"}
 	if got := paths(skipped); !reflect.DeepEqual(got, want) {
-		t.Fatalf("SkipChefignore: got %v, want %v", got, want)
+		t.Fatalf("WithSkipChefignore: got %v, want %v", got, want)
 	}
 	idHonored, _ := honored.Identifiers()
 	idSkipped, _ := skipped.Identifiers()

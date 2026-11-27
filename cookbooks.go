@@ -249,27 +249,52 @@ func (s *CookbooksService) Delete(ctx context.Context, name, version string) (*R
 	return resp, err
 }
 
-// UploadOption configures Cookbooks.Upload.
-type UploadOption func(*uploadOptions)
+// CookbookUploadOption configures Cookbooks.Upload and
+// CookbookArtifacts.Upload.
+type CookbookUploadOption func(*uploadOptions)
 
 type uploadOptions struct {
 	freeze, force bool
+	progress      func(path string)
+}
+
+// WithUploadProgress calls fn with each file's cookbook-relative path once
+// it is uploaded. Files the server already holds are not sent and not
+// reported. Files upload in parallel, so fn may be called from several
+// goroutines at once.
+func WithUploadProgress(fn func(path string)) CookbookUploadOption {
+	return func(o *uploadOptions) { o.progress = fn }
+}
+
+// CookbookDownloadOption configures Cookbooks.Download and DownloadFiles.
+type CookbookDownloadOption func(*downloadOptions)
+
+type downloadOptions struct {
+	progress func(path string)
+}
+
+// WithDownloadProgress calls fn with each file's cookbook-relative path once
+// it is in place under the destination, whether it was fetched or was already
+// there with the right checksum, so the calls add up to the manifest. Files
+// download in parallel, so fn may be called from several goroutines at once.
+func WithDownloadProgress(fn func(path string)) CookbookDownloadOption {
+	return func(o *downloadOptions) { o.progress = fn }
 }
 
 // WithFreeze uploads the cookbook version frozen, as knife cookbook upload
 // --freeze does: the server then refuses to replace it unless an upload is
 // WithForce. Freezing cannot be undone.
-func WithFreeze() UploadOption { return func(o *uploadOptions) { o.freeze = true } }
+func WithFreeze() CookbookUploadOption { return func(o *uploadOptions) { o.freeze = true } }
 
 // WithForce replaces the version even if it is frozen, as knife cookbook
 // upload --force does. It does not unfreeze it.
-func WithForce() UploadOption { return func(o *uploadOptions) { o.force = true } }
+func WithForce() CookbookUploadOption { return func(o *uploadOptions) { o.force = true } }
 
 // Upload uploads a LocalCookbook: sandbox -> file PUTs -> version manifest PUT.
 //
 // Replacing a frozen version without WithForce fails with an error matching
 // ErrCookbookFrozen (and ErrConflict).
-func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook, opts ...UploadOption) error {
+func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook, opts ...CookbookUploadOption) error {
 	var o uploadOptions
 	for _, opt := range opts {
 		opt(&o)
@@ -288,12 +313,12 @@ func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook, opts .
 // destDir (see DownloadFiles). version may be LatestVersion. To learn the
 // resolved version before choosing destDir, Get the manifest and pass it to
 // DownloadFiles instead, which saves fetching it twice.
-func (s *CookbooksService) Download(ctx context.Context, name, version, destDir string) error {
+func (s *CookbooksService) Download(ctx context.Context, name, version, destDir string, opts ...CookbookDownloadOption) error {
 	cb, _, err := s.Get(ctx, name, version)
 	if err != nil {
 		return fmt.Errorf("cinc: get cookbook manifest: %w", err)
 	}
-	return s.DownloadFiles(ctx, cb, destDir)
+	return s.DownloadFiles(ctx, cb, destDir, opts...)
 }
 
 // DownloadFiles writes every file of an already-fetched cookbook manifest (a
@@ -308,7 +333,11 @@ func (s *CookbooksService) Download(ctx context.Context, name, version, destDir 
 // leave it, writes go through an os.Root on destDir: a symlink already under
 // destDir may point elsewhere inside it, but one pointing out of it fails the
 // download (a directory) or is replaced by the downloaded file (a file).
-func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, destDir string) error {
+func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, destDir string, opts ...CookbookDownloadOption) error {
+	var o downloadOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if cb == nil {
 		return fmt.Errorf("cinc: DownloadFiles: nil cookbook manifest")
 	}
@@ -339,6 +368,9 @@ func (s *CookbooksService) DownloadFiles(ctx context.Context, cb *Cookbook, dest
 	return parallelForEach(ctx, jobs, func(ctx context.Context, j fileDownload) error {
 		if err := s.client.downloadFile(ctx, root, j.url, j.rel, j.checksum); err != nil {
 			return fmt.Errorf("cinc: download %s: %w", j.path, err)
+		}
+		if o.progress != nil {
+			o.progress(j.path)
 		}
 		return nil
 	})
@@ -482,6 +514,9 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 		if err := c.uploadFile(ctx, j.url, j.file); err != nil {
 			return fmt.Errorf("cinc: upload %s: %w", j.file.name, err)
 		}
+		if o.progress != nil {
+			o.progress(j.file.name)
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -589,7 +624,7 @@ type localCookbookOptions struct {
 	skipChefignore bool
 }
 
-// SkipChefignore makes LocalCookbookFromDir ignore chefignore: no chefignore
+// WithSkipChefignore makes LocalCookbookFromDir ignore chefignore: no chefignore
 // is read, and files it would exclude are kept. Every other selection rule
 // (root dot-directories, the chef-zero sentinel, symlinks, special files)
 // still applies.
@@ -599,7 +634,7 @@ type localCookbookOptions struct {
 // Policyfile identifiers chef-cli would compute for it whenever chefignore
 // excludes anything; do not write them into a Policyfile.lock.json. The
 // option is for packaging a cookbook as-is, such as a Supermarket tarball.
-func SkipChefignore() LocalCookbookOption {
+func WithSkipChefignore() LocalCookbookOption {
 	return func(o *localCookbookOptions) { o.skipChefignore = true }
 }
 
@@ -636,7 +671,7 @@ func SkipChefignore() LocalCookbookOption {
 // it is read; its content is not kept, but streamed from disk again by the
 // upload. An empty directory is an error. The selected files are available
 // from Files, and the Policyfile identifier over them from Identifiers. The
-// SkipChefignore option keeps the files chefignore would drop.
+// WithSkipChefignore option keeps the files chefignore would drop.
 func LocalCookbookFromDir(dir, version string, opts ...LocalCookbookOption) (*LocalCookbook, error) {
 	var o localCookbookOptions
 	for _, opt := range opts {

@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -72,11 +73,22 @@ func (s *CookbookArtifactsService) Delete(ctx context.Context, name, identifier 
 // Upload uploads a LocalCookbook as a cookbook artifact using the
 // sandbox/checksum protocol, then PUTs the artifact manifest at
 // PUT /organizations/NAME/cookbook_artifacts/NAME/IDENTIFIER.
-func (s *CookbookArtifactsService) Upload(ctx context.Context, cb *LocalCookbook, identifier string) error {
+//
+// WithUploadProgress applies. WithFreeze and WithForce do not, and are an
+// error: an artifact's identifier is a hash of its content, and the server
+// never replaces one.
+func (s *CookbookArtifactsService) Upload(ctx context.Context, cb *LocalCookbook, identifier string, opts ...CookbookUploadOption) error {
+	var o uploadOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.freeze || o.force {
+		return errors.New("cinc: a cookbook artifact cannot be uploaded WithFreeze or WithForce")
+	}
 	// Work on a shallow copy so the caller's struct is not mutated.
 	artifact := *cb
 	artifact.identifier = identifier
-	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &artifact, uploadOptions{}); err != nil {
+	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &artifact, o); err != nil {
 		return fmt.Errorf("cinc: upload cookbook artifact: %w", err)
 	}
 	return nil
