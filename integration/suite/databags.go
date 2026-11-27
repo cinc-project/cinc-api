@@ -16,7 +16,7 @@ func testDataBagLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	items := c.DataBags.Items(bag)
 	id := uniqueName(t, "item")
 
-	created, _, err := items.Create(ctx, cinc.DataBagItem{"id": id, "port": 8080.0, "tags": []any{"a", "b"}})
+	created, _, err := items.Create(ctx, cinc.DataBagItem{"id": id, "port": json.Number("8080"), "tags": []any{"a", "b"}})
 	if err != nil {
 		t.Fatalf("Create item: %v", err)
 	}
@@ -32,7 +32,7 @@ func testDataBagLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	if err != nil {
 		t.Fatalf("Get item: %v", err)
 	}
-	want := cinc.DataBagItem{"id": id, "port": 8080.0, "tags": []any{"a", "b"}}
+	want := cinc.DataBagItem{"id": id, "port": json.Number("8080"), "tags": []any{"a", "b"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("item = %v, want %v", got, want)
 	}
@@ -45,7 +45,7 @@ func testDataBagLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 		t.Fatalf("%s missing from item list", id)
 	}
 
-	got["port"] = 9090.0
+	got["port"] = json.Number("9090")
 	if _, _, err := items.Update(ctx, got); err != nil {
 		t.Fatalf("Update item: %v", err)
 	}
@@ -53,7 +53,7 @@ func testDataBagLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	if err != nil {
 		t.Fatalf("Get item after update: %v", err)
 	}
-	if again["port"] != 9090.0 {
+	if again["port"] != json.Number("9090") {
 		t.Fatalf("after update: item = %v", again)
 	}
 
@@ -87,7 +87,7 @@ func testDataBagEncryptedRoundTrip(t *testing.T, _ Target, c *cinc.Client) {
 	plain := cinc.DataBagItem{
 		"id":       id,
 		"password": "hunter2",
-		"port":     5432.0,
+		"port":     json.Number("5432"),
 		"replicas": map[string]any{"primary": "db1", "standby": []any{"db2", "db3"}},
 	}
 
@@ -149,7 +149,7 @@ func testDataBagEncryptedEdit(t *testing.T, _ Target, c *cinc.Client) {
 	}
 
 	current["motd"] = "hello again"
-	current["port"] = 5432.0
+	current["port"] = json.Number("5432")
 	if _, _, err := items.UpdateEncrypted(ctx, current, secret); err != nil {
 		t.Fatalf("UpdateEncrypted: %v", err)
 	}

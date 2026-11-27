@@ -8,6 +8,18 @@ import (
 // DataBagItem is a single data bag item. It must contain an "id" key.
 type DataBagItem map[string]any
 
+// UnmarshalJSON decodes a data bag item, numbers as json.Number at every
+// depth, for the same reason as Attributes: an update sends back exactly what
+// the server stored.
+func (i *DataBagItem) UnmarshalJSON(b []byte) error {
+	m, err := decodeObject(b)
+	if err != nil {
+		return err
+	}
+	*i = m
+	return nil
+}
+
 // ID returns the item's "id" field.
 func (i DataBagItem) ID() string {
 	s, _ := i["id"].(string)
