@@ -103,7 +103,7 @@ func TestPolicies_GetRevision(t *testing.T) {
 	if lock.Version != "1.0.0" || lock.Identifier != "deadbeef" {
 		t.Errorf("lock = %+v", lock)
 	}
-	if rev.DefaultAttributes["port"] != float64(8080) {
+	if rev.DefaultAttributes["port"] != json.Number("8080") {
 		t.Errorf("default_attributes = %v", rev.DefaultAttributes)
 	}
 }
