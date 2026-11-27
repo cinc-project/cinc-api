@@ -81,10 +81,9 @@ func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 		t.Errorf("metadata dependencies = %v", md.Dependencies)
 	}
 	// Each file is classified into the segment chef-client looks in, so it
-	// can find the recipe. How that shows depends on the server API version:
-	// the per-segment layout (erchef at API v0/v1) lists the file in the
-	// segment's slice under its bare name, while all_files (API v2, and
-	// cinc-server-ng at any version) prefixes the name with the segment.
+	// can find the recipe. Get asks for API v2, where the server returns
+	// all_files and prefixes each name with its segment; a server older than
+	// v2 lists the file in the segment's slice under its bare name instead.
 	segments := fileSegments(got)
 	for path, segment := range map[string]string{
 		"recipes/default.rb":       "recipes",
@@ -100,6 +99,67 @@ func testCookbookUploadDownload(t *testing.T, _ Target, c *cinc.Client) {
 	dest := t.TempDir()
 	if err := c.Cookbooks.Download(ctx, name, "1.0.0", dest); err != nil {
 		t.Fatalf("Download: %v", err)
+	}
+	for rel, want := range files {
+		assertFile(t, filepath.Join(dest, filepath.FromSlash(rel)), want)
+	}
+}
+
+// testCookbookNonSegmentFiles uploads a cookbook and a cookbook artifact with
+// files outside the nine classic segments (ohai/, compliance/) and checks
+// that both download intact. erchef returns such files only in a manifest
+// fetched at server API version 2: at 0 or 1 it rebuilds the segments and
+// drops the rest (chef_cookbook_version:populate_segments).
+func testCookbookNonSegmentFiles(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	name := uniqueName(t, "nonsegment")
+	identifier := randomHex(t, 20)
+	cleanup(t, "cookbook "+name, func(ctx context.Context) error {
+		_, err := c.Cookbooks.Delete(ctx, name, "1.0.0")
+		return err
+	})
+	cleanup(t, "cookbook artifact "+name, func(ctx context.Context) error {
+		_, err := c.CookbookArtifacts.Delete(ctx, name, identifier)
+		return err
+	})
+
+	src := filepath.Join(t.TempDir(), "src")
+	files := map[string]string{
+		"metadata.rb":              "name '" + name + "'\nversion '1.0.0'\n",
+		"recipes/default.rb":       uniqueContent(name, "package 'nginx'\n"),
+		"ohai/plugins/x.rb":        uniqueContent(name, "Ohai.plugin(:X) { provides 'x' }\n"),
+		"compliance/inspec.yml":    uniqueContent(name, "name: x\n"),
+		"compliance/profiles/x.rb": uniqueContent(name, "control 'x' do\nend\n"),
+	}
+	for rel, content := range files {
+		writeFile(t, filepath.Join(src, filepath.FromSlash(rel)), content)
+	}
+	cb, err := cinc.LocalCookbookFromDir(src, "")
+	if err != nil {
+		t.Fatalf("LocalCookbookFromDir: %v", err)
+	}
+
+	if err := c.Cookbooks.Upload(ctx, cb); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	dest := t.TempDir()
+	if err := c.Cookbooks.Download(ctx, name, "1.0.0", dest); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	for rel, want := range files {
+		assertFile(t, filepath.Join(dest, filepath.FromSlash(rel)), want)
+	}
+
+	if err := c.CookbookArtifacts.Upload(ctx, cb, identifier); err != nil {
+		t.Fatalf("CookbookArtifacts.Upload: %v", err)
+	}
+	artifact, _, err := c.CookbookArtifacts.Get(ctx, name, identifier)
+	if err != nil {
+		t.Fatalf("CookbookArtifacts.Get: %v", err)
+	}
+	dest = t.TempDir()
+	if err := c.Cookbooks.DownloadFiles(ctx, artifact, dest); err != nil {
+		t.Fatalf("DownloadFiles(artifact): %v", err)
 	}
 	for rel, want := range files {
 		assertFile(t, filepath.Join(dest, filepath.FromSlash(rel)), want)

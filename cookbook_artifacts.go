@@ -55,9 +55,11 @@ func (s *CookbookArtifactsService) GetVersions(ctx context.Context, name string)
 	return &entry, resp, nil
 }
 
-// Get retrieves a single cookbook artifact by name and identifier.
+// Get retrieves a single cookbook artifact by name and identifier. Like
+// Cookbooks.Get it asks for server API version 2, so the files come back in
+// AllFilesManifest, including those outside the classic segments.
 func (s *CookbookArtifactsService) Get(ctx context.Context, name, identifier string) (*Cookbook, *Response, error) {
-	cb, resp, err := do[Cookbook](ctx, s.client, "GET",
+	cb, resp, err := do[Cookbook](withServerAPIVersion(ctx, manifestAPIVersion), s.client, "GET",
 		s.client.orgPath("/cookbook_artifacts/"+esc(name)+"/"+esc(identifier)), nil)
 	return ptrOrNil(cb, err), resp, err
 }

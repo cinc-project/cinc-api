@@ -58,6 +58,7 @@ var cases = []testCase{
 	{"search/query", testSearchQuery},
 	{"clients/lifecycle", testClientLifecycle},
 	{"cookbooks/upload-download", testCookbookUploadDownload},
+	{"cookbooks/non-segment-files", testCookbookNonSegmentFiles},
 	{"cookbook-artifacts/upload", testCookbookArtifactUpload},
 	{"policies/push-revision-two-groups", testPushRevisionToTwoGroups},
 	{"roles/lifecycle", testRoleLifecycle},

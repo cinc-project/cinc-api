@@ -77,10 +77,11 @@ type CookbookMetadata struct {
 }
 
 // Cookbook is a single cookbook version's manifest as returned by the server.
-// A server returns files in one of two shapes: the per-segment slices (the
-// classic cookbook_version layout) or the flat AllFilesManifest ("all_files",
-// used by Policyfile-era cookbook and cookbook_artifact manifests). AllFiles
-// merges whichever the server populated.
+// A server returns files in one of two shapes: the flat AllFilesManifest
+// ("all_files", server API version 2, which Get asks for) or the per-segment
+// slices (the classic cookbook_version layout, returned at API version 0 or 1
+// and by servers older than version 2). AllFiles merges whichever the server
+// populated.
 type Cookbook struct {
 	CookbookName string `json:"cookbook_name"`
 	Name         string `json:"name"`
@@ -97,10 +98,13 @@ type Cookbook struct {
 	Metadata CookbookMetadata `json:"metadata,omitzero"`
 
 	// AllFilesManifest is the flat "all_files" file list. Cookbooks uploaded by
-	// this client use it, and modern servers return it on Get.
+	// this client use it, and a server that speaks API version 2 returns it on
+	// Get. It holds every file, including those in no classic segment.
 	AllFilesManifest []CookbookFileRef `json:"all_files,omitempty"`
 
-	// Per-segment slices (classic cookbook_version layout).
+	// Per-segment slices (classic cookbook_version layout), populated only by a
+	// server that predates API version 2. They cannot hold a file outside the
+	// nine segments.
 	Files       []CookbookFileRef `json:"files"`
 	Definitions []CookbookFileRef `json:"definitions"`
 	Libraries   []CookbookFileRef `json:"libraries"`
@@ -235,9 +239,12 @@ func (s *CookbooksService) GetVersions(ctx context.Context, name, numVersions st
 	return &entry, resp, nil
 }
 
-// Get retrieves a single cookbook version manifest.
+// Get retrieves a single cookbook version manifest. It asks for server API
+// version 2 (manifestAPIVersion), so the files come back in AllFilesManifest:
+// at version 0 or 1 Chef Server returns only the nine classic segments and
+// drops every file outside them, such as ohai/ and compliance/.
 func (s *CookbooksService) Get(ctx context.Context, name, version string) (*Cookbook, *Response, error) {
-	cb, resp, err := do[Cookbook](ctx, s.client, "GET",
+	cb, resp, err := do[Cookbook](withServerAPIVersion(ctx, manifestAPIVersion), s.client, "GET",
 		s.client.orgPath("/cookbooks/"+esc(name)+"/"+esc(version)), nil)
 	return ptrOrNil(cb, err), resp, err
 }
@@ -436,10 +443,13 @@ func createTemp(root *os.Root, rel string) (string, *os.File, error) {
 	return name, f, err
 }
 
-// manifestAPIVersion is the server API version the manifest PUT asks for.
-// The manifest lists files in the flat all_files form, which Chef Server only
-// accepts from API version 2 on: at 0 or 1 erchef validates the body against
-// the per-segment schema and rejects the all_files key.
+// manifestAPIVersion is the server API version cookbook and artifact
+// manifests are sent and fetched at. The manifest lists files in the flat
+// all_files form, which Chef Server only accepts from API version 2 on: at 0
+// or 1 erchef validates the body against the per-segment schema and rejects
+// the all_files key. On a GET at 0 or 1 erchef rebuilds the segments from the
+// stored all_files and silently drops any file outside them
+// (chef_cookbook_version:populate_segments), so the manifest is read at 2 too.
 const manifestAPIVersion = "2"
 
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.

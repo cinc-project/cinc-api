@@ -84,6 +84,12 @@ file new ones at cinc-project/cinc-server-ng):
   cinc-server-ng answers a non-numeric requested version with a 400 whose
   header says `request_version`/`response_version` are the minimum, where
   erchef sends a 406 with both `-1`.
+- **cinc-server-ng** returns every file of a cookbook or cookbook artifact
+  on a GET at server API version 1. erchef rebuilds the nine classic
+  segments there and silently drops any file outside them (ohai/,
+  compliance/, …; `chef_cookbook_version:populate_segments`), which is why
+  `Cookbooks.Get` and `CookbookArtifacts.Get` ask for version 2
+  (`manifestAPIVersion`), as chef-client does.
 - **Neither server** rejects a cookbook manifest with bare file names
   (`default.rb` instead of `recipes/default.rb`), but chef-client misfiles
   every such entry, so only a converge would show it.
