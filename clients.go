@@ -67,7 +67,7 @@ func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*ClientCrea
 		PublicKey: cl.PublicKey,
 		CreateKey: cl.PublicKey == "",
 	}
-	r, resp, err := do[ClientCreateResult](ctx, s.client, "POST", s.res().coll(), req)
+	r, resp, err := doCreate[ClientCreateResult](ctx, s.client, s.res().coll(), cl.Name, req)
 	return ptrOrNil(r, err), resp, err
 }
 

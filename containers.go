@@ -30,8 +30,8 @@ func (s *ContainersService) Get(ctx context.Context, name string) (*Container, *
 // Create creates a new container. The Chef Server uses the same value for
 // containername and containerpath, so a single name argument suffices.
 func (s *ContainersService) Create(ctx context.Context, name string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "POST",
-		s.client.orgPath("/containers"),
+	_, resp, err := doCreate[map[string]any](ctx, s.client,
+		s.client.orgPath("/containers"), name,
 		Container{Name: name, Path: name})
 	return resp, err
 }

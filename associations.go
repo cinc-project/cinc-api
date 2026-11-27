@@ -61,7 +61,7 @@ func (s *AssociationsService) GetMember(ctx context.Context, name string) (*OrgU
 // AddMember immediately associates an existing user with the organization.
 // This is a superuser-only operation; most callers should use Invite instead.
 func (s *AssociationsService) AddMember(ctx context.Context, username string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "POST", s.client.orgPath("/users"),
+	_, resp, err := doCreate[map[string]any](ctx, s.client, s.client.orgPath("/users"), username,
 		map[string]string{"username": username})
 	return resp, err
 }
@@ -80,8 +80,8 @@ func (s *AssociationsService) ListInvites(ctx context.Context) ([]Invitation, *R
 
 // Invite creates an invitation for username to join the organization.
 func (s *AssociationsService) Invite(ctx context.Context, username string) (*InviteResult, *Response, error) {
-	r, resp, err := do[InviteResult](ctx, s.client, "POST",
-		s.client.orgPath("/association_requests"), map[string]string{"user": username})
+	r, resp, err := doCreate[InviteResult](ctx, s.client,
+		s.client.orgPath("/association_requests"), username, map[string]string{"user": username})
 	return ptrOrNil(r, err), resp, err
 }
 

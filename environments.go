@@ -34,7 +34,7 @@ func (s *EnvironmentsService) Get(ctx context.Context, name string) (*Environmen
 // created object, so there is nothing to return but the response and any
 // error.
 func (s *EnvironmentsService) Create(ctx context.Context, e *Environment) (*Response, error) {
-	_, resp, err := s.res().create(ctx, e)
+	_, resp, err := s.res().create(ctx, e.Name, e)
 	return resp, err
 }
 

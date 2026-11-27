@@ -69,7 +69,7 @@ func (s *UsersService) Create(ctx context.Context, u *User) (*UserCreateResult, 
 	if req.PublicKey == "" {
 		req.CreateKey = true
 	}
-	r, resp, err := do[UserCreateResult](ctx, s.client, "POST", "/users", &req)
+	r, resp, err := doCreate[UserCreateResult](ctx, s.client, "/users", u.Username, &req)
 	return ptrOrNil(r, err), resp, err
 }
 

@@ -42,6 +42,12 @@ type ErrorResponse struct {
 	Path       string   // request path
 	StatusCode int      // HTTP status code
 	Messages   []string // server-reported error messages
+
+	// Name is the name of the object a create sent, such as "web1" for
+	// Nodes.Create of a node named web1. A create POSTs to the collection,
+	// so Path does not say which object a 409 conflict is about; Name does.
+	// It is "" when the request was not a create of a named object.
+	Name string
 }
 
 // ServerMessage returns what the server said, its Messages joined with "; ",
@@ -85,6 +91,16 @@ func (e *ErrorResponse) Unwrap() error {
 	default:
 		return nil
 	}
+}
+
+// withName records name as the Name of the *ErrorResponse in err, if err
+// holds one, and returns err unchanged otherwise. An empty name sets nothing.
+func withName(err error, name string) error {
+	var er *ErrorResponse
+	if name != "" && errors.As(err, &er) {
+		er.Name = name
+	}
+	return err
 }
 
 // newErrorResponse builds an *ErrorResponse, decoding the Chef error body.
