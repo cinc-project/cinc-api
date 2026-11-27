@@ -4,11 +4,16 @@ on:
   pull_request:
 jobs:
   test:
+    # The library supports both maintained Go releases (go.mod says 1.26), so
+    # test on each; integration and lint are internal and run on the newest.
+    strategy:
+      matrix:
+        go: ['1.26', '1.27']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with: { go-version: '1.27' }
+        with: { go-version: '${{ matrix.go }}' }
       - run: go build ./...
       - run: go test -race -coverprofile=coverage.out ./...
 
@@ -45,11 +50,11 @@ jobs:
         with:
           # Pinned so a new linter release cannot turn a green branch red
           # without a commit.
-          version: v2.14.0
+          version: v2.15.0
       - name: golangci-lint (integration module)
         # A separate Go module, so the run above does not reach it — and
         # neither did the `go vet ./...` this job replaces.
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.14.0
+          version: v2.15.0
           working-directory: integration

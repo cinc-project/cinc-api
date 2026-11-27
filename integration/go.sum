@@ -1,5 +1,5 @@
-github.com/cinc-project/cinc-server-ng v0.21.0 h1:+pqCDw3ylQbZYxrq+U0UPfiXHBoTIfduQfclY/Fu7MQ=
-github.com/cinc-project/cinc-server-ng v0.21.0/go.mod h1:4T9qkxiZEybDUtoRUWPJRSzZYwjcqXrS7C3x32flsyY=
+github.com/cinc-project/cinc-server-ng v0.22.0 h1:9CjYN833IDFNUSGnfzcKMJ1A56qDUzZSJW21/H6x9wo=
+github.com/cinc-project/cinc-server-ng v0.22.0/go.mod h1:4T9qkxiZEybDUtoRUWPJRSzZYwjcqXrS7C3x32flsyY=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/google/pprof v0.0.0-20261016150608-1facf8f91b50 h1:PlNWJRxu5APSV0pWqfIsZ0qt9OOGHSWfZQ4zvx+WgWs=

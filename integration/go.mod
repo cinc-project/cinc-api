@@ -9,7 +9,7 @@ go 1.27.4
 
 require (
 	github.com/cinc-project/cinc-api v0.0.0
-	github.com/cinc-project/cinc-server-ng v0.21.0
+	github.com/cinc-project/cinc-server-ng v0.22.0
 )
 
 require (
