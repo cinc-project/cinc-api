@@ -9,10 +9,22 @@ import (
 )
 
 // StatMetric is one measured value within a Stat, optionally carrying
-// Prometheus-style labels.
+// Prometheus-style labels. A counter, gauge or untyped metric sets Value; a
+// histogram sets SampleSum, SampleCount and Buckets instead. The server sends
+// every number as a string.
 type StatMetric struct {
-	Value  string            `json:"value"`
-	Labels map[string]string `json:"labels,omitempty"`
+	Value       string            `json:"value,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	SampleSum   string            `json:"sample_sum,omitempty"`
+	SampleCount string            `json:"sample_count,omitempty"`
+	Buckets     []StatBucket      `json:"bucket,omitempty"`
+}
+
+// StatBucket is one bucket of a histogram StatMetric: how many samples were
+// at most UpperBound ("+Inf" for the last bucket).
+type StatBucket struct {
+	CumulativeCount string `json:"cumulative_count"`
+	UpperBound      string `json:"upper_bound"`
 }
 
 // Stat is one metric family reported by the /_stats endpoint.
