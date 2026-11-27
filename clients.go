@@ -41,10 +41,10 @@ type clientUpdateRequest struct {
 
 // ChefKey holds key material returned when a client is created.
 type ChefKey struct {
-	Name       string `json:"name,omitempty"`
-	PublicKey  string `json:"public_key,omitempty"`
-	PrivateKey string `json:"private_key,omitempty"`
-	ExpiresAt  string `json:"expiration_date,omitempty"`
+	Name           string `json:"name,omitempty"`
+	PublicKey      string `json:"public_key,omitempty"`
+	PrivateKey     string `json:"private_key,omitempty"`
+	ExpirationDate string `json:"expiration_date,omitempty"`
 }
 
 // ClientsService accesses the /clients endpoints.

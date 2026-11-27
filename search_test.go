@@ -44,7 +44,7 @@ func TestSearch_Query(t *testing.T) {
 	}
 }
 
-// TestSearch_AllWithStart verifies that SearchAll with WithStart(10) sends
+// TestSearch_AllWithStart verifies that Collect with WithStart(10) sends
 // correct absolute offsets on successive pages: page 1 start=10,
 // page 2 start=10+pageSize, etc., and that all rows are returned exactly once.
 func TestSearch_AllWithStart(t *testing.T) {
@@ -85,10 +85,10 @@ func TestSearch_AllWithStart(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*",
+	rows, err := c.Search.Collect(context.Background(), "node", "*:*",
 		WithStart(startOffset), WithRows(pageSize))
 	if err != nil {
-		t.Fatalf("SearchAll: %v", err)
+		t.Fatalf("Collect: %v", err)
 	}
 
 	// Expect exactly 2 requests.
@@ -141,9 +141,9 @@ func TestSearch_All_CapsPrealloc(t *testing.T) {
 		w.Write([]byte(`{"total":1,"start":1000,"rows":[]}`))
 	})
 	c := newTestClient(t, srv.Server)
-	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*")
+	rows, err := c.Search.Collect(context.Background(), "node", "*:*")
 	if err != nil {
-		t.Fatalf("SearchAll: %v", err)
+		t.Fatalf("Collect: %v", err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
@@ -203,7 +203,7 @@ func TestSearch_All_PropagatesError(t *testing.T) {
 	srv.Handle("GET /organizations/o/search/node",
 		cinctest.Route{Status: 404, Body: `{"error":["no index"]}`})
 	c := newTestClient(t, srv.Server)
-	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*")
+	rows, err := c.Search.Collect(context.Background(), "node", "*:*")
 	if err == nil {
 		t.Fatal("expected error from underlying Query")
 	}
@@ -225,9 +225,9 @@ func TestSearch_All(t *testing.T) {
 		w.Write([]byte(`{"total":3,"start":2,"rows":[{"name":"c"}]}`))
 	})
 	c := newTestClient(t, srv.Server)
-	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*", WithRows(2))
+	rows, err := c.Search.Collect(context.Background(), "node", "*:*", WithRows(2))
 	if err != nil || len(rows) != 3 {
-		t.Fatalf("SearchAll: %d rows, %v", len(rows), err)
+		t.Fatalf("Collect: %d rows, %v", len(rows), err)
 	}
 }
 
@@ -676,7 +676,7 @@ func TestSearchAll_PagesPastDeletedObjects(t *testing.T) {
 			defer srv.Close()
 			c := newTestClient(t, srv)
 
-			rows, err := c.Search.SearchAll(context.Background(), "node", "*:*", WithRows(2))
+			rows, err := c.Search.Collect(context.Background(), "node", "*:*", WithRows(2))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -26,7 +26,7 @@ func testInviteAccept(t *testing.T, tgt Target, c *cinc.Client) {
 		t.Fatalf("UserInviteCount = %d, %v; want at least 1", n, err)
 	}
 
-	if _, err := uc.Associations.RespondInvite(ctx, user, id, true); err != nil {
+	if _, err := uc.Associations.AcceptInvite(ctx, user, id); err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
 	if !isMember(t, c, user) {
@@ -61,7 +61,7 @@ func testInviteReject(t *testing.T, tgt Target, c *cinc.Client) {
 	user, key := newUser(t, c)
 	id := invite(t, c, user)
 
-	if _, err := clientAs(t, tgt, user, key).Associations.RespondInvite(ctx, user, id, false); err != nil {
+	if _, err := clientAs(t, tgt, user, key).Associations.RejectInvite(ctx, user, id); err != nil {
 		t.Fatalf("reject invite: %v", err)
 	}
 	if isMember(t, c, user) {

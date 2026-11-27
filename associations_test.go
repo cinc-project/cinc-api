@@ -160,7 +160,7 @@ func TestAssociations_UserInviteCount(t *testing.T) {
 	}
 }
 
-func TestAssociations_RespondInvite_Accept(t *testing.T) {
+func TestAssociations_AcceptInvite(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("PUT /users/janedoe/association_requests/abc", cinctest.Route{
 		Body: `{"id":"abc","orgname":"testorg","response":"accept"}`,
@@ -174,12 +174,12 @@ func TestAssociations_RespondInvite_Accept(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	if _, err := c.Associations.RespondInvite(context.Background(), "janedoe", "abc", true); err != nil {
-		t.Fatalf("RespondInvite: %v", err)
+	if _, err := c.Associations.AcceptInvite(context.Background(), "janedoe", "abc"); err != nil {
+		t.Fatalf("respond to invite: %v", err)
 	}
 }
 
-func TestAssociations_RespondInvite_Reject(t *testing.T) {
+func TestAssociations_RejectInvite(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("PUT /users/janedoe/association_requests/abc", cinctest.Route{
 		Body: `{"id":"abc","orgname":"testorg","response":"reject"}`,
@@ -193,8 +193,8 @@ func TestAssociations_RespondInvite_Reject(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	if _, err := c.Associations.RespondInvite(context.Background(), "janedoe", "abc", false); err != nil {
-		t.Fatalf("RespondInvite: %v", err)
+	if _, err := c.Associations.RejectInvite(context.Background(), "janedoe", "abc"); err != nil {
+		t.Fatalf("respond to invite: %v", err)
 	}
 }
 

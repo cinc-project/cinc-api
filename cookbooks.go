@@ -160,12 +160,13 @@ type cookbookFile struct {
 // still be on disk, unchanged, when it is uploaded; a file edited in between
 // fails the upload's Content-MD5 check rather than sending new bytes under the
 // old checksum.
-// When Identifier is set the manifest is emitted as a cookbook artifact
-// version (chef_type "cookbook_artifact_version") rather than a plain version.
+// CookbookArtifacts.Upload sends it as a cookbook artifact version (chef_type
+// "cookbook_artifact_version") under the identifier it is given;
+// Cookbooks.Upload sends it as a plain version.
 type LocalCookbook struct {
 	Name       string
 	Version    string
-	Identifier string // set for cookbook artifact uploads
+	identifier string // set on CookbookArtifacts.Upload's copy only
 
 	// Metadata is sent as the manifest's metadata block, which Chef Server
 	// requires and chef-client reads (dependencies, chef_version, …).
@@ -490,8 +491,8 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	}
 	// Use Identifier for artifact uploads; Version for regular cookbooks.
 	slug := cb.Version
-	if cb.Identifier != "" {
-		slug = cb.Identifier
+	if cb.identifier != "" {
+		slug = cb.identifier
 	}
 	path := c.orgPath(base + "/" + esc(cb.Name) + "/" + esc(slug))
 	if o.force {
@@ -505,7 +506,7 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 }
 
 // cookbookManifest builds the version manifest body for an upload, as Chef's
-// CookbookManifest#generate_manifest does. When cb.Identifier is set it emits
+// CookbookManifest#generate_manifest does. When cb.identifier is set it emits
 // a cookbook artifact manifest (chef_type "cookbook_artifact_version");
 // otherwise a plain version manifest.
 //
@@ -533,11 +534,11 @@ func cookbookManifest(cb *LocalCookbook) (map[string]any, error) {
 			"checksum": f.checksum, "specificity": specificity,
 		})
 	}
-	if cb.Identifier != "" {
+	if cb.identifier != "" {
 		return map[string]any{
 			"cookbook_name": cb.Name,
 			"name":          cb.Name,
-			"identifier":    cb.Identifier,
+			"identifier":    cb.identifier,
 			"version":       cb.Version,
 			"metadata":      md,
 			"all_files":     all,

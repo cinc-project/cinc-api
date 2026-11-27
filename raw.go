@@ -33,10 +33,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) ([]by
 	return c.doRaw(ctx, strings.ToUpper(method), path, body)
 }
 
-// WithServerAPIVersion returns a context whose requests ask for, and sign,
+// ContextWithServerAPIVersion returns a context whose requests ask for, and sign,
 // server API version v instead of the client's default. Use it with Do for
 // endpoints whose shape depends on the version.
-func WithServerAPIVersion(ctx context.Context, v string) context.Context {
+func ContextWithServerAPIVersion(ctx context.Context, v string) context.Context {
 	return withServerAPIVersion(ctx, v)
 }
 

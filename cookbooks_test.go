@@ -525,7 +525,7 @@ func TestCookbookManifest_MatchesChef(t *testing.T) {
 		// Metadata.from_hash(o["metadata"]), so an artifact needs the same
 		// metadata block; Chef's generate_manifest also sets version.
 		artifact := *cb
-		artifact.Identifier = "abc123"
+		artifact.identifier = "abc123"
 		want := map[string]any{
 			"cookbook_name": "web",
 			"name":          "web",

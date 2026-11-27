@@ -39,7 +39,7 @@ func TestUsers_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if u.UserName != "alice" || u.Email != "alice@example.com" {
+	if u.Username != "alice" || u.Email != "alice@example.com" {
 		t.Errorf("User = %+v", u)
 	}
 }
@@ -72,7 +72,7 @@ func TestUsers_Create_ServerGeneratedKey(t *testing.T) {
 	c := newTestClient(t, srv.Server)
 
 	res, _, err := c.Users.Create(context.Background(), &User{
-		UserName:    "alice",
+		Username:    "alice",
 		DisplayName: "Alice",
 		Email:       "alice@example.com",
 		FirstName:   "Alice",
@@ -108,7 +108,7 @@ func TestUsers_Update(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 	resp, err := c.Users.Update(context.Background(), &User{
-		UserName: "alice", DisplayName: "Alice Renamed", Email: "alice@example.com",
+		Username: "alice", DisplayName: "Alice Renamed", Email: "alice@example.com",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -198,7 +198,7 @@ func TestUsers_Create_RequestBody(t *testing.T) {
 			},
 		})
 		c := newTestClient(t, srv.Server)
-		u := &User{UserName: "alice", DisplayName: "Alice", Email: "a@example.com", Password: "s3cret!"}
+		u := &User{Username: "alice", DisplayName: "Alice", Email: "a@example.com", Password: "s3cret!"}
 		res, _, err := c.Users.Create(context.Background(), u)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -227,7 +227,7 @@ func TestUsers_Create_RequestBody(t *testing.T) {
 			},
 		})
 		c := newTestClient(t, srv.Server)
-		if _, _, err := c.Users.Create(context.Background(), &User{UserName: "bob", PublicKey: "PUB"}); err != nil {
+		if _, _, err := c.Users.Create(context.Background(), &User{Username: "bob", PublicKey: "PUB"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 	})
