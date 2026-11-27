@@ -88,8 +88,15 @@ func (e *ErrorResponse) Unwrap() error {
 }
 
 // newErrorResponse builds an *ErrorResponse, decoding the Chef error body.
+// Every message is passed through sanitizeServerText, so a caller can print
+// ServerMessage or Error to a terminal as is.
 func newErrorResponse(method, path string, code int, body []byte) *ErrorResponse {
 	er := &ErrorResponse{Method: method, Path: path, StatusCode: code}
+	add := func(m string) {
+		if m = sanitizeServerText(m); m != "" {
+			er.Messages = append(er.Messages, m)
+		}
+	}
 	var parsed struct {
 		Error   json.RawMessage `json:"error"`
 		Message string          `json:"message"`
@@ -100,23 +107,26 @@ func newErrorResponse(method, path string, code int, body []byte) *ErrorResponse
 		var list []json.RawMessage
 		if json.Unmarshal(parsed.Error, &list) == nil {
 			for _, item := range list {
-				if m := errorText(item); m != "" {
-					er.Messages = append(er.Messages, m)
-				}
+				add(errorText(item))
 			}
-		} else if m := errorText(parsed.Error); m != "" {
-			er.Messages = []string{m}
+		} else {
+			add(errorText(parsed.Error))
 		}
 		// An invalid API version answers with a slug in "error" and the
 		// explanation in a top-level "message".
-		if parsed.Message != "" {
-			er.Messages = append(er.Messages, parsed.Message)
-		}
+		add(parsed.Message)
 	}
 	if len(er.Messages) == 0 && len(body) > 0 {
-		er.Messages = []string{truncate(strings.TrimSpace(string(body)), maxRawErrorBody)}
+		er.Messages = []string{rawErrorText(body)}
 	}
 	return er
+}
+
+// rawErrorText is the message for an error body that is not a Chef error
+// document: sanitized, then trimmed and capped at maxRawErrorBody, so escape
+// sequences do not count against the cap.
+func rawErrorText(body []byte) string {
+	return truncate(strings.TrimSpace(sanitizeServerText(string(body))), maxRawErrorBody)
 }
 
 // maxRawErrorBody caps an error body that is not a Chef error document (a

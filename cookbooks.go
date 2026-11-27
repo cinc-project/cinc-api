@@ -478,7 +478,7 @@ func writeVerified(root *os.Root, rel string, r io.Reader, checksum string) (err
 		return fmt.Errorf("cinc: read file body: %w", err)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); checksum != "" && !strings.EqualFold(got, checksum) {
-		return fmt.Errorf("cinc: checksum mismatch: got md5 %s, manifest lists %s", got, checksum)
+		return fmt.Errorf("cinc: checksum mismatch: got md5 %s, manifest lists %q", got, checksum)
 	}
 	if err = root.Rename(tmpName, rel); err != nil {
 		return fmt.Errorf("cinc: write file: %w", err)

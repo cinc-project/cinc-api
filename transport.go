@@ -212,12 +212,13 @@ var s3ErrorRE = regexp.MustCompile(`(?s)<Code>(.*?)</Code>.*?<Message>(.*?)</Mes
 // body. An S3 error can echo the request's credentials (SignatureDoesNotMatch
 // includes the canonical request, the access key and the signature), so only
 // its Code and Message are kept; any other body is capped like an API one.
+// Both are sanitized, as newErrorResponse sanitizes an API error.
 func transferErrorMessages(body []byte) []string {
 	if m := s3ErrorRE.FindSubmatch(body); m != nil {
-		return []string{string(m[1]) + ": " + string(m[2])}
+		return []string{sanitizeServerText(string(m[1]) + ": " + string(m[2]))}
 	}
-	if s := strings.TrimSpace(string(body)); s != "" {
-		return []string{truncate(s, maxRawErrorBody)}
+	if s := rawErrorText(body); s != "" {
+		return []string{s}
 	}
 	return nil
 }
@@ -373,7 +374,8 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 
 // redirectError reports a 3xx to a signed request, which the client does not
 // follow (see refuseRedirect). It names the Location, resolved against the
-// request URL, so a misconfigured server URL or proxy is easy to spot.
+// request URL, so a misconfigured server URL or proxy is easy to spot. The
+// Location is server text, so it is sanitized like an error body.
 func redirectError(method, path string, r *http.Response) *ErrorResponse {
 	where := "no Location"
 	if loc, err := r.Location(); err == nil {
@@ -383,7 +385,7 @@ func redirectError(method, path string, r *http.Response) *ErrorResponse {
 	}
 	return &ErrorResponse{
 		Method: method, Path: path, StatusCode: r.StatusCode,
-		Messages: []string{"the server redirected to " + where +
+		Messages: []string{"the server redirected to " + sanitizeServerText(where) +
 			", and signed requests do not follow redirects; check the server URL"},
 	}
 }
