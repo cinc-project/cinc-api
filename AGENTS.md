@@ -89,7 +89,7 @@ file new ones at cinc-project/cinc-server-ng):
   segments there and silently drops any file outside them (ohai/,
   compliance/, …; `chef_cookbook_version:populate_segments`), which is why
   `Cookbooks.Get` and `CookbookArtifacts.Get` ask for version 2
-  (`manifestAPIVersion`), as chef-client does.
+  (`manifestAPIVersion`), as chef-client does (cinc-server-ng#297).
 - **Neither server** rejects a cookbook manifest with bare file names
   (`default.rb` instead of `recipes/default.rb`), but chef-client misfiles
   every such entry, so only a converge would show it.
