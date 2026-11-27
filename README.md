@@ -216,6 +216,10 @@ model, so callers don't re-encode server conventions:
   (`license "All rights reserved"`, `version "0.0.0"`,
   `eager_load_libraries true`, empty strings, `{}` and `[]`) for anything
   unset. A name is required.
+- `Cookbooks.Upload(cb, WithFreeze())` uploads a version frozen, as `knife
+  cookbook upload --freeze` does; replacing a frozen version then fails with
+  `ErrCookbookFrozen` (also `ErrConflict`) unless the upload is `WithForce()`.
+  `Cookbook.Frozen` reports the flag, which the server never clears.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,

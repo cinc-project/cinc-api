@@ -23,6 +23,9 @@ var (
 	// nothing about the caller's own grant permission: erchef checks this
 	// rule before it checks authorization. ACLs.Revoke reports it.
 	ErrAdminsRequiredOnGrant = errors.New("cinc: the admins group cannot be removed from the grant permission")
+	// ErrCookbookFrozen is Cookbooks.Upload refused because the version is
+	// frozen; upload WithForce to replace it. It also matches ErrConflict.
+	ErrCookbookFrozen = errors.New("cinc: cookbook version is frozen")
 )
 
 // ErrorResponse describes a non-2xx response from the Chef server.

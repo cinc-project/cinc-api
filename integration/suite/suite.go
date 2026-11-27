@@ -82,6 +82,7 @@ var cases = []testCase{
 	{"acls/user", testUserACL},
 	{"principals/get", testPrincipals},
 	{"cookbooks/versions", testCookbookVersions},
+	{"cookbooks/freeze-and-force", testCookbookFreeze},
 	{"cookbooks/version-listing", testCookbookVersionListing},
 	{"cookbook-artifacts/list-delete", testCookbookArtifactListDelete},
 	{"policies/revisions", testPolicyRevisions},
