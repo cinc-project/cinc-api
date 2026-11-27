@@ -47,6 +47,15 @@ func TestNumbers_RoundTripLosslessly(t *testing.T) {
 			}
 		}
 	})
+	t.Run("policy revision attributes", func(t *testing.T) {
+		var p PolicyRevision
+		if err := json.Unmarshal([]byte(`{"name":"p","default_attributes":{"n":`+bigInt+`},"override_attributes":{"n":`+bigInt+`}}`), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.DefaultAttributes["n"] != json.Number(bigInt) || p.OverrideAttributes["n"] != json.Number(bigInt) {
+			t.Errorf("attributes = %#v / %#v, want json.Number", p.DefaultAttributes["n"], p.OverrideAttributes["n"])
+		}
+	})
 	t.Run("data bag item", func(t *testing.T) {
 		var item DataBagItem
 		if err := json.Unmarshal([]byte(`{"id":"x","n":`+bigInt+`,"list":[`+bigInt+`]}`), &item); err != nil {

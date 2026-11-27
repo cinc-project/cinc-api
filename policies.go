@@ -30,8 +30,8 @@ type PolicyRevision struct {
 	RunList              []string                `json:"run_list"`
 	NamedRunLists        map[string][]string     `json:"named_run_lists,omitempty"`
 	CookbookLocks        map[string]CookbookLock `json:"cookbook_locks"`
-	DefaultAttributes    map[string]any          `json:"default_attributes,omitempty"`
-	OverrideAttributes   map[string]any          `json:"override_attributes,omitempty"`
+	DefaultAttributes    Attributes              `json:"default_attributes,omitempty"`
+	OverrideAttributes   Attributes              `json:"override_attributes,omitempty"`
 	SolutionDependencies json.RawMessage         `json:"solution_dependencies,omitempty"`
 	IncludedPolicyLocks  []json.RawMessage       `json:"included_policy_locks,omitempty"`
 }
