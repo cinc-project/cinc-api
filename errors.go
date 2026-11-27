@@ -80,22 +80,46 @@ func (e *ErrorResponse) Unwrap() error {
 func newErrorResponse(method, path string, code int, body []byte) *ErrorResponse {
 	er := &ErrorResponse{Method: method, Path: path, StatusCode: code}
 	var parsed struct {
-		Error json.RawMessage `json:"error"`
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
 	}
 	if json.Unmarshal(body, &parsed) == nil && parsed.Error != nil {
-		// "error" may be a []string or a bare string.
-		var list []string
+		// "error" is a bare string, or a list whose elements are strings or,
+		// for depsolver failures, objects carrying a "message".
+		var list []json.RawMessage
 		if json.Unmarshal(parsed.Error, &list) == nil {
-			er.Messages = list
-		} else {
-			var s string
-			if json.Unmarshal(parsed.Error, &s) == nil {
-				er.Messages = []string{s}
+			for _, item := range list {
+				if m := errorText(item); m != "" {
+					er.Messages = append(er.Messages, m)
+				}
 			}
+		} else if m := errorText(parsed.Error); m != "" {
+			er.Messages = []string{m}
+		}
+		// An invalid API version answers with a slug in "error" and the
+		// explanation in a top-level "message".
+		if parsed.Message != "" {
+			er.Messages = append(er.Messages, parsed.Message)
 		}
 	}
 	if len(er.Messages) == 0 && len(body) > 0 {
 		er.Messages = []string{strings.TrimSpace(string(body))}
 	}
 	return er
+}
+
+// errorText returns the text of one element of an erchef "error" value: a
+// string, or an object's "message".
+func errorText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.Message
+	}
+	return ""
 }

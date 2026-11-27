@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,10 @@ const retryBaseDelay = 100 * time.Millisecond
 // server (or a proxy in front of it) cannot stall a caller for minutes.
 const maxRetryAfter = 10 * time.Second
 
+// maxBackoff caps the exponential wait between retries, so a large
+// WithMaxRetries cannot stall a caller for minutes between attempts.
+const maxBackoff = 10 * time.Second
+
 // doRaw sends a signed request and returns the raw response body.
 // The caller owns closing nothing — the body is fully read and closed here.
 //
@@ -42,10 +48,24 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body []byte) ([
 			status = resp.StatusCode
 			hdr = resp.HTTPResponse.Header
 		}
-		if !retryable(method, status, err) || !c.backoff(ctx, attempt, c.retryAfter(status, hdr)) {
+		if !retryable(method, status, err) {
 			return data, resp, err
 		}
+		if !c.backoff(ctx, attempt, c.retryAfter(status, hdr)) {
+			return data, resp, giveUp(ctx, err)
+		}
 	}
+}
+
+// giveUp is the error a retry loop returns when it stops retrying err: err
+// itself once the retries are spent, or, when the caller's context ended
+// during the wait, an error that matches ctx.Err() and still wraps err, so
+// errors.Is(err, context.Canceled) holds and the server's answer is kept.
+func giveUp(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("cinc: gave up retrying: %w (last attempt: %w)", ctxErr, err)
+	}
+	return err
 }
 
 // retryable reports whether a signed request that ended with status and err
@@ -65,20 +85,33 @@ func retryable(method string, status int, err error) bool {
 // or a failure on the wire. status is 0 when no HTTP response arrived. A
 // non-2xx response surfaces as an error too, which is why the status is
 // checked rather than the error alone — otherwise every 4xx (not-found,
-// forbidden, ...) would look like a failure worth repeating.
+// forbidden, ...) would look like a failure worth repeating. 501 and 505 say
+// the server cannot handle the request at all, so they are not transient.
 func shouldRetry(status int, err error) bool {
+	switch status {
+	case http.StatusNotImplemented, http.StatusHTTPVersionNotSupported:
+		return false
+	}
 	return status >= 500 || isRetriable(err)
 }
 
-// backoff waits before retry number attempt (0-based), doubling the delay
-// each time, or for atLeast if that is longer (see retryAfter). It reports
-// false, without waiting, once maxRetries is spent, or if ctx ends during the
-// wait: either way the caller should give up.
+// backoff waits before retry number attempt (0-based), or for atLeast if that
+// is longer (see retryAfter). The wait doubles with each attempt up to
+// maxBackoff and is jittered over its upper half, so clients failing together
+// (parallel creates draining erchef's key pool) do not retry in lockstep. It
+// reports false, without waiting, once maxRetries is spent or the caller's
+// context has ended, or if ctx ends during the wait: either way the caller
+// should give up.
 func (c *Client) backoff(ctx context.Context, attempt int, atLeast time.Duration) bool {
-	if attempt >= c.opts.maxRetries {
+	if attempt >= c.opts.maxRetries || ctx.Err() != nil {
 		return false
 	}
-	return c.sleep(ctx, max(retryBaseDelay<<attempt, atLeast))
+	d := maxBackoff
+	if attempt < 20 { // 100ms<<20 is far past the cap; a larger shift could overflow
+		d = min(retryBaseDelay<<attempt, maxBackoff)
+	}
+	d = d/2 + rand.N(d/2)
+	return c.sleep(ctx, max(d, atLeast))
 }
 
 // retryAfter returns the wait a 503 response's Retry-After header asks for,
@@ -105,15 +138,19 @@ func (c *Client) retryAfter(status int, h http.Header) time.Duration {
 // client's.
 //
 // Transient failures are retried with the same policy as signed GETs:
-// shouldRetry, backoff and WithMaxRetries. newReq is called once per attempt
+// shouldRetry, backoff and WithMaxRetries. A timeout is the exception: a file
+// too big for WithTransferTimeout would only time out again. newReq is called once per attempt
 // so each one sends its body from the start. handle consumes a 2xx response;
 // an error it returns is retried only if it wraps a transportErr, so a
 // failure reading the body is retried while a local disk error is not.
 func (c *Client) doTransfer(ctx context.Context, newReq func() (*http.Request, error), handle func(*http.Response) error) error {
 	for attempt := 0; ; attempt++ {
 		status, hdr, err := c.transferOnce(newReq, handle)
-		if !shouldRetry(status, err) || !c.backoff(ctx, attempt, c.retryAfter(status, hdr)) {
+		if errors.Is(err, context.DeadlineExceeded) || !shouldRetry(status, err) {
 			return err
+		}
+		if !c.backoff(ctx, attempt, c.retryAfter(status, hdr)) {
+			return giveUp(ctx, err)
 		}
 	}
 }
@@ -127,14 +164,27 @@ func (c *Client) transferOnce(newReq func() (*http.Request, error), handle func(
 	}
 	resp, err := c.transferClient.Do(req)
 	if err != nil {
+		// The *url.Error repeats the URL, whose query holds a pre-signed
+		// URL's credentials; keep them out of the message.
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			ue.URL = redactQuery(req.URL)
+		}
 		return 0, nil, &transportErr{fmt.Errorf("cinc: bookshelf %s: %w", req.Method, err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, resp.Header, newErrorResponse(req.Method, req.URL.String(), resp.StatusCode, body)
+		return resp.StatusCode, resp.Header, newErrorResponse(req.Method, redactQuery(req.URL), resp.StatusCode, body)
 	}
 	return resp.StatusCode, resp.Header, handle(resp)
+}
+
+// redactQuery returns u without its query string, which for a pre-signed
+// bookshelf or S3 URL carries the signature and credentials.
+func redactQuery(u *url.URL) string {
+	r := *u
+	r.RawQuery, r.ForceQuery = "", false
+	return r.String()
 }
 
 // wireReader marks read errors from a response body as transport failures,
@@ -159,13 +209,17 @@ func (e *transportErr) Error() string { return e.err.Error() }
 func (e *transportErr) Unwrap() error { return e.err }
 
 // isRetriable reports whether err is a wire failure a GET may safely repeat.
-// Context cancellation and deadlines never retry: the caller is done waiting.
-// Neither does a failed TLS handshake that will fail the same way next time.
+// Cancellation never retries: the caller is done waiting. Neither does a
+// failed TLS handshake that will fail the same way next time. An http.Client
+// timeout does, as chef-client retries one; it matches
+// context.DeadlineExceeded just as the caller's own deadline does, so that is
+// told apart by backoff, which never retries once the caller's context has
+// ended.
 func isRetriable(err error) bool {
 	if _, ok := errors.AsType[*transportErr](err); !ok {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
 	return !isPermanentTLSError(err)
@@ -205,6 +259,23 @@ func withServerAPIVersion(ctx context.Context, v string) context.Context {
 	return context.WithValue(ctx, apiVersionKey{}, v)
 }
 
+// requestedAPIVersion returns the server API version ctx asks for, or "" for
+// the default. erchef parses the header as an integer and re-formats it to
+// rebuild the string it verifies, so the version is canonicalized the same
+// way ("02" is signed as "2"), and anything else is refused here rather than
+// coming back as a 401 that blames the key.
+func requestedAPIVersion(ctx context.Context) (string, error) {
+	v, _ := ctx.Value(apiVersionKey{}).(string)
+	if v == "" {
+		return "", nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return "", fmt.Errorf("cinc: invalid server API version %q: want a non-negative integer", v)
+	}
+	return strconv.Itoa(n), nil
+}
+
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) ([]byte, *Response, error) {
 	u := c.baseURLStr + path
 	var rdr io.Reader
@@ -215,15 +286,15 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("cinc: build request: %w", err)
 	}
-	// Strip the query string from the path used for signing only; the v1.3
-	// signing spec requires the canonical path to exclude the query string.
-	signPath := path
-	if before, _, ok := strings.Cut(path, "?"); ok {
-		signPath = before
+	apiVersion, err := requestedAPIVersion(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-	apiVersion, _ := ctx.Value(apiVersionKey{}).(string)
+	// Sign exactly the path net/http puts on the wire, which is what erchef
+	// verifies: the escaped path, without the query string (the v1.3 protocol
+	// leaves it out) or a fragment (never sent).
 	hdrs, err := signing.SignHeaders(signing.Request{
-		Method: method, Path: signPath, Body: body,
+		Method: method, Path: req.URL.EscapedPath(), Body: body,
 		UserID: c.clientName, Timestamp: c.timestamp(),
 		APIVersion: apiVersion,
 	}, c.key)

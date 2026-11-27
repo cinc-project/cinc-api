@@ -28,7 +28,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) ([]by
 	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
 		return nil, nil, fmt.Errorf("cinc: Do: path %q must start with a single \"/\"", path)
 	}
-	return c.doRaw(ctx, method, path, body)
+	// erchef signs and dispatches on the upper-case method, and only an
+	// upper-case GET is retried as one.
+	return c.doRaw(ctx, strings.ToUpper(method), path, body)
 }
 
 // WithServerAPIVersion returns a context whose requests ask for, and sign,
