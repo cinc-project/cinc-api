@@ -151,3 +151,39 @@ func TestErrorResponse_ServerMessage(t *testing.T) {
 		})
 	}
 }
+
+// The 401 hint is added only where the server's message leaves the cause
+// open, and names the cause where it is known. The messages are erchef's
+// (oc_chef_wm_base:verify_request_message, chef_wm_malformed) and
+// cinc-server-ng's (server/auth.go).
+func TestErrorResponse_401HintMatchesCause(t *testing.T) {
+	const generic = " (check the client key and that the local clock is in sync)"
+	const key = " (check that the client key is the one the server has for this client)"
+	cases := []struct {
+		name, msg, hint string
+	}{
+		{"unknown actor", "Failed to authenticate as 'web1'. Ensure that your node_name and client key are correct.", ""},
+		{"bad signature", "Invalid signature for user or client 'web1'", key},
+		{"erchef clock", "Failed to authenticate as web1. Synchronize the clock on your host.", ""},
+		{"cinc-server-ng clock", "Original request time stamp too far in the future or past.", ""},
+		{"bad timestamp", "invalid X-Ops-Timestamp", ""},
+		{"missing headers", "missing required authentication header(s) X-Ops-UserId", ""},
+		{"password login", "Failed to authenticate: Username and password incorrect", ""},
+		{"unrecognized", "bad sig", generic},
+		{"no message", "", generic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &ErrorResponse{Method: "GET", Path: "/x", StatusCode: 401}
+			shown := "(no message)"
+			if tc.msg != "" {
+				e.Messages = []string{tc.msg}
+				shown = tc.msg
+			}
+			want := "cinc: GET /x: 401: " + shown + tc.hint
+			if got := e.Error(); got != want {
+				t.Errorf("Error() = %q, want %q", got, want)
+			}
+		})
+	}
+}
