@@ -230,9 +230,38 @@ func TestGroups_Update_Errors(t *testing.T) {
 	if _, _, err := c.Groups.Update(context.Background(), "", &Group{Name: "devs"}); err == nil {
 		t.Error("Update with no current name returned nil error")
 	}
-	// A group read back and then given a new Name, but not a new GroupName,
-	// is ambiguous: refuse it rather than guess which one is the rename.
-	if _, _, err := c.Groups.Update(context.Background(), "devs", &Group{Name: "ops", GroupName: "devs"}); err == nil {
-		t.Error("Update with Name and GroupName disagreeing returned nil error")
+	// Two different new names are ambiguous: refuse rather than guess.
+	if _, _, err := c.Groups.Update(context.Background(), "devs", &Group{Name: "ops", GroupName: "qa"}); err == nil {
+		t.Error("Update with Name and GroupName naming different new names returned nil error")
+	}
+}
+
+// A group read with Get carries its name in both Name and GroupName; changing
+// either one renames it, so a caller need not know which field is sent.
+func TestGroups_Update_RenameFromAFetchedGroup(t *testing.T) {
+	for _, g := range []*Group{
+		{Name: "ops", GroupName: "devs"},
+		{Name: "devs", GroupName: "ops"},
+		{Name: "ops", GroupName: "ops"},
+	} {
+		srv := cinctest.New(t)
+		var sent string
+		srv.Handle("PUT /organizations/o/groups/devs", cinctest.Route{
+			Status: 201,
+			Body:   `{"groupname":"ops","actors":{"users":[],"clients":[],"groups":[]}}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				var b struct {
+					GroupName string `json:"groupname"`
+				}
+				json.Unmarshal(body, &b)
+				sent = b.GroupName
+			},
+		})
+		if _, _, err := newTestClient(t, srv.Server).Groups.Update(context.Background(), "devs", g); err != nil {
+			t.Fatalf("%+v: %v", g, err)
+		}
+		if sent != "ops" {
+			t.Errorf("%+v: sent groupname %q, want ops", g, sent)
+		}
 	}
 }

@@ -144,23 +144,24 @@ func (s *GroupsService) Create(ctx context.Context, name string) (*Response, err
 // actors:{users,clients,groups}} shape the server requires on PUT; nil member
 // slices become empty JSON arrays rather than null. g is not modified.
 //
-// To rename the group, set g.Name or g.GroupName to the new name: the server
-// then answers 201 with the new location. With both empty the current name
-// is kept; with both set they must agree, so a group read with Get needs
-// both changed (or one cleared) to rename it.
+// To rename the group, set g.Name or g.GroupName to the new name (either
+// one, so a group read with Get, which carries its name in both, can be
+// renamed by changing one): the server then answers 201 with the new
+// location. A field that is empty or holds the current name keeps it; the two
+// naming different new names is an error.
 func (s *GroupsService) Update(ctx context.Context, name string, g *Group) (*Group, *Response, error) {
 	if name == "" {
 		return nil, nil, errors.New("cinc: Groups.Update needs the group's current name")
 	}
-	newName := g.Name
-	switch {
-	case newName == "":
-		newName = g.GroupName
-	case g.GroupName != "" && g.GroupName != newName:
-		return nil, nil, fmt.Errorf("cinc: Groups.Update: Name %q and GroupName %q disagree", g.Name, g.GroupName)
-	}
-	if newName == "" {
-		newName = name
+	newName := name
+	for _, n := range []string{g.Name, g.GroupName} {
+		if n == "" || n == name || n == newName {
+			continue
+		}
+		if newName != name {
+			return nil, nil, fmt.Errorf("cinc: Groups.Update: Name %q and GroupName %q name different new names", g.Name, g.GroupName)
+		}
+		newName = n
 	}
 	// erchef takes the new name from "groupname" only
 	// (oc_chef_group:update_from_ejson), so that is the key sent.
