@@ -74,6 +74,10 @@ file new ones at cinc-project/cinc-server-ng):
   sends only `{"uri"}` (`oc_chef_wm_named_user:finalize_update_body`), which
   is why `Users.Update` returns no `*User`. Client, org and group PUTs echo
   the object on both.
+- **cinc-server-ng** resolves `recipe[x]` items in a depsolver
+  `cookbook_versions` POST; erchef splits each item on `@` and `::` only, so
+  it looks `recipe[x]` up as a cookbook of that name and answers 412. That is
+  why `Environments.CookbookVersions` unwraps them.
 - **cinc-server-ng** accepts `POST .../keys` with neither `create_key` nor
   `public_key` (it generates one) and without `expiration_date` (it stores
   `infinity`). erchef rejects both with a 400; `KeyScope.Create` fills them in.

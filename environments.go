@@ -2,6 +2,8 @@ package cinc
 
 import (
 	"context"
+	"fmt"
+	"strings"
 )
 
 // Environment is a Chef environment object.
@@ -77,10 +79,32 @@ func (s *EnvironmentsService) GetCookbook(ctx context.Context, env, name, numVer
 // CookbookVersions solves the given run list against the environment and
 // returns the cookbook versions (including dependencies) required to satisfy
 // it, keyed by cookbook name.
+//
+// Each item names a recipe: "cookbook", "cookbook::recipe", either with an
+// "@version" pin, or any of those wrapped in recipe[...], as a node's run
+// list holds them. The server's depsolver reads only bare names (it splits
+// each item on "@" and "::", so it would look recipe[x] up as a cookbook of
+// that name), so recipe[...] is unwrapped before sending. It cannot expand a
+// role: expand roles into their recipes first, as chef-client does. A role[...]
+// item is an error and nothing is sent.
+//
+// When the run list cannot be solved the server answers 412; the
+// *ErrorResponse's message names the missing cookbooks or failed
+// constraints.
 func (s *EnvironmentsService) CookbookVersions(ctx context.Context, env string, runList []string) (map[string]Cookbook, *Response, error) {
+	items := make([]string, len(runList))
+	for i, item := range runList {
+		if strings.HasPrefix(item, "role[") {
+			return nil, nil, fmt.Errorf("cinc: CookbookVersions: run list item %q is a role; expand roles into recipes first", item)
+		}
+		if inner, ok := strings.CutPrefix(item, "recipe["); ok {
+			item = strings.TrimSuffix(inner, "]")
+		}
+		items[i] = item
+	}
 	return do[map[string]Cookbook](ctx, s.client, "POST",
 		s.client.orgPath("/environments/"+esc(env)+"/cookbook_versions"),
-		map[string][]string{"run_list": runList})
+		map[string][]string{"run_list": items})
 }
 
 // ListNodes returns the name->URL index of nodes in the environment.

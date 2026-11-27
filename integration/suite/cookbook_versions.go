@@ -69,6 +69,15 @@ func testCookbookVersions(t *testing.T, _ Target, c *cinc.Client) {
 	if _, ok := solved[dep]; !ok {
 		t.Fatalf("solution lacks dependency %s: %v", dep, solved)
 	}
+	// A node's run list holds recipe[...] items; erchef's depsolver reads
+	// only bare names, so the client unwraps them.
+	wrapped, _, err := c.Environments.CookbookVersions(ctx, env, []string{"recipe[" + name + "::default]"})
+	if err != nil {
+		t.Fatalf("Environments.CookbookVersions with a recipe[...] item: %v", err)
+	}
+	if wrapped[name].Version != "1.0.0" {
+		t.Fatalf("solved recipe[%s::default] = %q, want 1.0.0", name, wrapped[name].Version)
+	}
 	envCookbooks, _, err := c.Environments.ListCookbooks(ctx, env, "all")
 	if err != nil {
 		t.Fatalf("Environments.ListCookbooks: %v", err)
