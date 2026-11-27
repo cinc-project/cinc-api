@@ -2,8 +2,11 @@ package cinc
 
 import (
 	"context"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -89,5 +92,113 @@ func TestGET_EmptyBodyIsAnError(t *testing.T) {
 	defer srv.Close()
 	if _, err := newTestClient(t, srv).Nodes.Delete(context.Background(), "web"); err != nil {
 		t.Errorf("DELETE with an empty body: %v", err)
+	}
+}
+
+// A server whose total promises rows it never returns must not keep the
+// iterator paging for ever: a run of empty pages is an error, not silence,
+// since stopping quietly would truncate the results.
+func TestSearch_EmptyPagesDoNotRunForever(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"total":1000000000000,"start":0,"rows":[]}`))
+	}))
+	defer srv.Close()
+	_, err := newTestClient(t, srv).Search.Collect(context.Background(), "node", "*:*", WithRows(10))
+	if err == nil || !strings.Contains(err.Error(), "empty pages") {
+		t.Errorf("err = %v, want an empty-pages error", err)
+	}
+	if n := hits.Load(); n != maxEmptySearchPages {
+		t.Errorf("requests = %d, want %d", n, maxEmptySearchPages)
+	}
+}
+
+// The next offset cannot overflow into a negative start.
+func TestSearch_HugeRowsDoNotOverflow(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"total":1000000000000,"start":1,"rows":[{"name":"a"}]}`))
+	}))
+	defer srv.Close()
+	rows, err := newTestClient(t, srv).Search.Collect(context.Background(), "node", "*:*", WithStart(1), WithRows(math.MaxInt))
+	if err != nil || len(rows) != 1 || hits.Load() != 1 {
+		t.Errorf("Collect = %d rows, %v after %d requests; want 1 row from 1 request", len(rows), err, hits.Load())
+	}
+}
+
+// Two manifest entries that land on one file would race two writers onto it,
+// one silently winning. Paths equal once cleaned always collide; paths equal
+// but for case collide on the case-insensitive filesystems macOS and Windows
+// use by default.
+func TestDownloadFiles_RefusesCollidingPaths(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("nothing should be fetched")
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	ref := func(p string) CookbookFileRef { return CookbookFileRef{Path: p, URL: srv.URL + "/f"} }
+
+	err := c.Cookbooks.DownloadFiles(context.Background(),
+		&Cookbook{AllFilesManifest: []CookbookFileRef{ref("recipes/x.rb"), ref("recipes/./x.rb")}}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "same file") {
+		t.Errorf("cleaned duplicate: err = %v, want a same-file error", err)
+	}
+
+	err = c.Cookbooks.DownloadFiles(context.Background(),
+		&Cookbook{AllFilesManifest: []CookbookFileRef{ref("recipes/default.rb"), ref("recipes/DEFAULT.rb")}}, t.TempDir())
+	if caseInsensitiveFS() {
+		if err == nil || !strings.Contains(err.Error(), "same file") {
+			t.Errorf("case-fold duplicate on %s: err = %v, want a same-file error", runtime.GOOS, err)
+		}
+	}
+}
+
+// A decrypted value is one JSON document; trailing bytes mean it is corrupt.
+func TestDecrypt_RejectsTrailingData(t *testing.T) {
+	if _, err := unboxValue([]byte(`{"json_wrapper":1} junk`)); err == nil {
+		t.Error("unboxValue accepted trailing data")
+	}
+}
+
+// An S3 or bookshelf error body can echo the request's credentials
+// (SignatureDoesNotMatch includes the canonical request and the provided
+// signature); only its Code and Message belong in an error.
+func TestTransferError_KeepsOnlyS3CodeAndMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match the signature you provided.</Message><AWSAccessKeyId>AKIAEXAMPLE</AWSAccessKeyId><CanonicalRequest>GET /x X-Amz-Credential=AKIAEXAMPLE%2Fsecret X-Amz-Security-Token=tok</CanonicalRequest><SignatureProvided>deadbeef</SignatureProvided></Error>`))
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	recordSleeps(c)
+	err := c.Fetch(context.Background(), srv.URL+"/x", func(io.Reader) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "SignatureDoesNotMatch: The request signature") {
+		t.Fatalf("err = %v, want the S3 code and message", err)
+	}
+	for _, secret := range []string{"AKIAEXAMPLE", "Security-Token", "deadbeef"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("err leaks %q: %v", secret, err)
+		}
+	}
+}
+
+// A body that is not a Chef error (a proxy's HTML page) is kept, but capped.
+func TestErrorResponse_CapsRawBody(t *testing.T) {
+	er := newErrorResponse("GET", "/x", 502, []byte(strings.Repeat("x", 100_000)))
+	if n := len(er.ServerMessage()); n > maxRawErrorBody+len("…") {
+		t.Errorf("message is %d bytes, want at most %d", n, maxRawErrorBody)
+	}
+}
+
+// truncate never cuts a multi-byte character in half.
+func TestTruncate_RuneBoundary(t *testing.T) {
+	if got := truncate("ab€", 3); got != "ab…" { // € is 3 bytes: cutting at 3 would split it
+		t.Errorf("truncate = %q, want %q", got, "ab…")
+	}
+	if got := truncate("abc", 3); got != "abc" {
+		t.Errorf("truncate = %q, want it unchanged", got)
 	}
 }

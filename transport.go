@@ -13,6 +13,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -189,12 +190,36 @@ func (c *Client) transferOnce(newReq func() (*http.Request, error), handle func(
 		}
 		return 0, nil, &transportErr{fmt.Errorf("cinc: bookshelf %s: %w", req.Method, err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain what a handler left unread (it may stop early on a
+		// checksum mismatch), so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, resp.Header, newErrorResponse(req.Method, redactQuery(req.URL), resp.StatusCode, body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		er := newErrorResponse(req.Method, redactQuery(req.URL), resp.StatusCode, nil)
+		er.Messages = transferErrorMessages(body)
+		return resp.StatusCode, resp.Header, er
 	}
 	return resp.StatusCode, resp.Header, handle(resp)
+}
+
+// s3ErrorRE picks the Code and Message out of an S3 (or bookshelf) XML error.
+var s3ErrorRE = regexp.MustCompile(`(?s)<Code>(.*?)</Code>.*?<Message>(.*?)</Message>`)
+
+// transferErrorMessages is what an error from a pre-signed URL reports of its
+// body. An S3 error can echo the request's credentials (SignatureDoesNotMatch
+// includes the canonical request, the access key and the signature), so only
+// its Code and Message are kept; any other body is capped like an API one.
+func transferErrorMessages(body []byte) []string {
+	if m := s3ErrorRE.FindSubmatch(body); m != nil {
+		return []string{string(m[1]) + ": " + string(m[2])}
+	}
+	if s := strings.TrimSpace(string(body)); s != "" {
+		return []string{truncate(s, maxRawErrorBody)}
+	}
+	return nil
 }
 
 // redactQuery returns u without its query string, which for a pre-signed

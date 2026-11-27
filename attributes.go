@@ -3,6 +3,7 @@ package cinc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 )
 
 // Attributes is a free-form Chef attribute tree. It marshals as a plain JSON
@@ -32,6 +33,9 @@ func decodeObject(b []byte) (map[string]any, error) {
 	var m map[string]any
 	if err := dec.Decode(&m); err != nil {
 		return nil, err
+	}
+	if dec.More() {
+		return nil, errors.New("cinc: unexpected data after the JSON object")
 	}
 	return m, nil
 }

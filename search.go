@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -275,12 +276,18 @@ func (s *SearchService) Collect(ctx context.Context, index, query string, opts .
 // eachPage is the single paging loop behind All and Collect. It requests
 // successive pages and calls fn with each one and the offset it was
 // requested at; fn returns false to stop without fetching further pages.
+// maxEmptySearchPages is how many empty pages in a row end a search with an
+// error. One empty page is normal (every object on it was deleted since it
+// was indexed); a long run means Total promises rows the server never sends.
+const maxEmptySearchPages = 10
+
 func (s *SearchService) eachPage(ctx context.Context, index, query string, opts []SearchOption, fn func(res *SearchResult, offset int) bool) error {
 	p := searchParams{rows: 1000}
 	for _, o := range opts {
 		o(&p)
 	}
 	offset := p.start
+	empty := 0
 	for {
 		res, _, err := s.Query(ctx, index, query,
 			WithStart(offset), WithRows(p.rows), WithPartial(p.partial))
@@ -294,9 +301,18 @@ func (s *SearchService) eachPage(ctx context.Context, index, query string, opts 
 		// the server drops objects deleted since they were indexed from a
 		// page, while Total still counts them. A short or empty page is not
 		// the end (chef-client's Search::Query pages the same way).
-		offset += p.rows
-		if p.rows <= 0 || offset >= res.Total {
+		if p.rows <= 0 || offset > math.MaxInt-p.rows {
 			return nil
+		}
+		offset += p.rows
+		if offset >= res.Total {
+			return nil
+		}
+		if len(res.Rows) > 0 {
+			empty = 0
+		} else if empty++; empty >= maxEmptySearchPages {
+			return fmt.Errorf("cinc: search %s %q: %d empty pages in a row at start %d of a reported total of %d; the results are incomplete",
+				index, query, empty, offset, res.Total)
 		}
 	}
 }
