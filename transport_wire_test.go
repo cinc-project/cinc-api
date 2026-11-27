@@ -86,8 +86,12 @@ func TestNewClient_RejectsServerURLWithPath(t *testing.T) {
 		"https://chef.example.com#frag",
 	} {
 		_, err := NewClient(Config{ServerURL: u, Org: "o", ClientName: "c", Key: testRSAKey(t)})
-		if err == nil || !strings.Contains(err.Error(), "ParseServerURL") {
-			t.Errorf("ServerURL %q: err = %v, want a rejection pointing at ParseServerURL", u, err)
+		want := "scheme://host[:port]"
+		if strings.Contains(u, "/organizations/") {
+			want = "ParseServerURL"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ServerURL %q: err = %v, want a rejection mentioning %s", u, err, want)
 		}
 	}
 	for _, u := range []string{"https://chef.example.com", "https://chef.example.com/", "http://127.0.0.1:8889"} {

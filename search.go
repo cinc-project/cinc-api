@@ -242,7 +242,8 @@ func decodeRows[T any](rows iter.Seq2[json.RawMessage, error], decode func(json.
 
 // Collect pages through every result, returning all rows.
 // WithStart(n) is respected as the absolute offset of the first row to fetch;
-// subsequent pages advance the offset by the number of rows received per page.
+// subsequent pages advance it by the page size requested (WithRows), so a page
+// shortened by objects deleted since they were indexed does not end paging.
 //
 // Collect holds the whole result set in memory; use All to process rows
 // page by page instead.

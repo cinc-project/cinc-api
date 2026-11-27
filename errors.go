@@ -9,9 +9,16 @@ import (
 
 // Sentinel errors for use with errors.Is.
 var (
-	ErrNotFound     = errors.New("cinc: not found")
-	ErrConflict     = errors.New("cinc: conflict")
-	ErrForbidden    = errors.New("cinc: forbidden")
+	// ErrNotFound is a 404: the object, or the organization, does not exist.
+	ErrNotFound = errors.New("cinc: not found")
+	// ErrConflict is a 409: an object of that name already exists, or (for a
+	// cookbook version) it is frozen; see ErrCookbookFrozen.
+	ErrConflict = errors.New("cinc: conflict")
+	// ErrForbidden is a 403: the requestor lacks the permission, or the
+	// server refused the change outright (see ErrAdminsRequiredOnGrant).
+	ErrForbidden = errors.New("cinc: forbidden")
+	// ErrUnauthorized is a 401: the signature did not verify, which is
+	// nearly always the wrong key or a skewed clock.
 	ErrUnauthorized = errors.New("cinc: unauthorized")
 	// ErrBadRequest is a 400: the server refused the request as malformed or
 	// naming something that does not exist, such as an unknown actor or group
