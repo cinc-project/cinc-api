@@ -81,7 +81,7 @@ func TestPushRevision_NoCookbooks(t *testing.T) {
 	// A lock with no cookbook locks pushes with a single PutPolicy and no
 	// uploads. The body must be sent verbatim — including fields the typed
 	// model does not know about ("x_unknown") — so nothing is dropped.
-	lockJSON := []byte(`{"name":"appserver","revision_id":"rev1","run_list":["recipe[base]"],"cookbook_locks":{},"x_unknown":"keep-me"}`)
+	lockJSON := []byte(`{"name":"appserver","revision_id":"rev1","run_list":["recipe[base::default]"],"cookbook_locks":{},"x_unknown":"keep-me"}`)
 
 	var gotBody []byte
 	srv := cinctest.New(t)
@@ -151,7 +151,7 @@ func TestPushRevision_UploadFailureIsWrapped(t *testing.T) {
 	}
 
 	const identifier = "deadbeef567890abcdef1234567890abcdef1234"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"` + identifier + `"}}}`)
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"` + identifier + `"}}}`)
 
 	var associated bool
 	srv := cinctest.New(t)
@@ -201,9 +201,9 @@ func TestPushRevision_UploadsArtifactsThenAssociates(t *testing.T) {
 		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
 
-	const identifier = "abc1234567890abcdef1234567890abcdef12345"
+	identifier, _ := cb.Identifiers()
 	recipeChecksum := md5Hex(recipe)
-	lockJSON := []byte(`{"name":"web","revision_id":"rev9","cookbook_locks":{"nginx":{"version":"1.2.0","identifier":"` + identifier + `"}}}`)
+	lockJSON := []byte(`{"name":"web","revision_id":"rev9","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.2.0","identifier":"` + identifier + `"}}}`)
 
 	var artifactUploaded, associated bool
 	srv := cinctest.New(t)
@@ -253,6 +253,14 @@ func TestPushRevision_UploadsArtifactsThenAssociates(t *testing.T) {
 	}
 }
 
+// cookbookID is the content identifier of pushTestCookbook(t, name), which a
+// lock must pin for PushRevision to upload that cookbook.
+func cookbookID(t *testing.T, name string) string {
+	t.Helper()
+	id, _ := pushTestCookbook(t, name).Identifiers()
+	return id
+}
+
 // pushTestCookbook writes a minimal cookbook named name to disk and loads it.
 func pushTestCookbook(t *testing.T, name string) *LocalCookbook {
 	t.Helper()
@@ -277,10 +285,10 @@ func TestPushRevision_SkipsArtifactsTheServerHas(t *testing.T) {
 	// locked identifier and must be skipped; "base" is present only under a
 	// different identifier and must still be uploaded.
 	const nginxID = "1111111111111111111111111111111111111111"
-	const baseID = "2222222222222222222222222222222222222222"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
-		`"nginx":{"identifier":"` + nginxID + `"},` +
-		`"base":{"identifier":"` + baseID + `"}}}`)
+	baseID := cookbookID(t, "base")
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{` +
+		`"nginx":{"version":"1.0.0","identifier":"` + nginxID + `"},` +
+		`"base":{"version":"1.0.0","identifier":"` + baseID + `"}}}`)
 
 	var lists int
 	var uploaded []string
@@ -339,9 +347,9 @@ func TestPushRevision_NoCookbookNeededForAnArtifactTheServerHas(t *testing.T) {
 	// lacks, so the cookbooks map has no entry (or a nil one) for an artifact
 	// the server already holds. The push skips it and uploads the rest.
 	const nginxID = "5555555555555555555555555555555555555555"
-	const baseID = "6666666666666666666666666666666666666666"
+	baseID := cookbookID(t, "base")
 	const aptID = "7777777777777777777777777777777777777777"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{` +
 		`"nginx":{"version":"1.0.0","identifier":"` + nginxID + `"},` +
 		`"apt":{"version":"1.0.0","identifier":"` + aptID + `"},` +
 		`"base":{"version":"1.0.0","identifier":"` + baseID + `"}}}`)
@@ -398,10 +406,10 @@ func TestPushRevision_MissingArtifactWithoutACookbookSendsNothing(t *testing.T) 
 	// before the first upload, so a gap anywhere in the lock leaves the server
 	// untouched: no upload, no association.
 	const nginxID = "8888888888888888888888888888888888888888"
-	const baseID = "9999999999999999999999999999999999999999"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
-		`"nginx":{"identifier":"` + nginxID + `"},` +
-		`"base":{"identifier":"` + baseID + `"}}}`)
+	baseID := cookbookID(t, "base")
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{` +
+		`"nginx":{"version":"1.0.0","identifier":"` + nginxID + `"},` +
+		`"base":{"version":"1.0.0","identifier":"` + baseID + `"}}}`)
 
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -497,8 +505,8 @@ func TestPushRevision_ConflictMeansAlreadyUploaded(t *testing.T) {
 	// A concurrent push can upload the same artifact between our list and our
 	// PUT. The identifier is a content hash, so the server's 409 means the
 	// artifact is present and the push should carry on.
-	const identifier = "3333333333333333333333333333333333333333"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"` + identifier + `"}}}`)
+	identifier := cookbookID(t, "nginx")
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"` + identifier + `"}}}`)
 
 	var associated bool
 	srv := cinctest.New(t)
@@ -537,7 +545,7 @@ func TestPushRevision_ConflictMeansAlreadyUploaded(t *testing.T) {
 }
 
 func TestPushRevision_ListFailure(t *testing.T) {
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"abc"}}}`)
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"abc"}}}`)
 	srv := cinctest.New(t)
 	srv.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && r.URL.Path == "/organizations/o/cookbook_artifacts" {
@@ -664,8 +672,8 @@ func TestPushRevision_UploadsUnderTheLockName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LocalCookbookFromDir: %v", err)
 	}
-	const identifier = "4444444444444444444444444444444444444444"
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"` + identifier + `"}}}`)
+	identifier, _ := cb.Identifiers()
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"` + identifier + `"}}}`)
 
 	var uploaded []string
 	c := newTestClient(t, pushServer(t, &uploaded).Server)
@@ -694,7 +702,7 @@ func TestPushRevision_RejectsACookbookThatDisagreesWithItsLock(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("metadata names another cookbook", func(t *testing.T) {
-		lock := []byte(`{"name":"web","cookbook_locks":{"nginx":{"identifier":"abc"}}}`)
+		lock := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"abc"}}}`)
 		_, _, err := c.Policies.PushRevision(ctx, lock, "prod", map[string]*LocalCookbook{"nginx": pushTestCookbook(t, "apache2")})
 		if err == nil {
 			t.Fatal("expected an error when the cookbook's metadata names another cookbook")
@@ -706,7 +714,7 @@ func TestPushRevision_RejectsACookbookThatDisagreesWithItsLock(t *testing.T) {
 		}
 	})
 	t.Run("version differs from the lock", func(t *testing.T) {
-		lock := []byte(`{"name":"web","cookbook_locks":{"nginx":{"version":"2.0.0","identifier":"abc"}}}`)
+		lock := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"2.0.0","identifier":"abc"}}}`)
 		_, _, err := c.Policies.PushRevision(ctx, lock, "prod", map[string]*LocalCookbook{"nginx": pushTestCookbook(t, "nginx")})
 		if err == nil {
 			t.Fatal("expected an error when the cookbook's version differs from the lock's")
@@ -719,9 +727,37 @@ func TestPushRevision_RejectsACookbookThatDisagreesWithItsLock(t *testing.T) {
 	})
 }
 
+// The identifier is a hash of the cookbook's content, and an artifact can
+// never be replaced once uploaded (a second PUT is a 409), so uploading other
+// content under a lock's identifier would pin every node to the wrong
+// cookbook for good. chef-cli refuses the same way (CachedCookbookModified).
+func TestPushRevision_RejectsContentThatIsNotTheLockedIdentifier(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Body: `{}`})
+	c := newTestClient(t, srv.Server)
+	cb := pushTestCookbook(t, "nginx")
+	id, dotted := cb.Identifiers()
+
+	t.Run("identifier", func(t *testing.T) {
+		lock := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"4444444444444444444444444444444444444444"}}}`)
+		_, _, err := c.Policies.PushRevision(context.Background(), lock, "prod", map[string]*LocalCookbook{"nginx": cb})
+		if err == nil || !strings.Contains(err.Error(), id) || !strings.Contains(err.Error(), "4444444444444444444444444444444444444444") {
+			t.Errorf("err = %v, want a mismatch naming both identifiers", err)
+		}
+	})
+	t.Run("dotted decimal identifier", func(t *testing.T) {
+		lock := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{"nginx":{"version":"1.0.0","identifier":"` + id + `","dotted_decimal_identifier":"1.2.3"}}}`)
+		_, _, err := c.Policies.PushRevision(context.Background(), lock, "prod", map[string]*LocalCookbook{"nginx": cb})
+		if err == nil || !strings.Contains(err.Error(), dotted) {
+			t.Errorf("err = %v, want a mismatch naming %s", err, dotted)
+		}
+	})
+}
+
 func TestPushRevision_ResultListsAreSorted(t *testing.T) {
-	lockJSON := []byte(`{"name":"web","cookbook_locks":{` +
-		`"zlib":{"identifier":"z1"},"apt":{"identifier":"a1"},"mysql":{"identifier":"m1"}}}`)
+	lockJSON := []byte(`{"name":"web","revision_id":"r1","run_list":["recipe[nginx::default]"],"cookbook_locks":{` +
+		`"zlib":{"version":"1.0.0","identifier":"` + cookbookID(t, "zlib") + `"},"apt":{"version":"1.0.0","identifier":"` + cookbookID(t, "apt") +
+		`"},"mysql":{"version":"1.0.0","identifier":"` + cookbookID(t, "mysql") + `"}}}`)
 	var uploaded []string
 	c := newTestClient(t, pushServer(t, &uploaded).Server)
 	cookbooks := map[string]*LocalCookbook{
@@ -745,7 +781,7 @@ func TestPushRevision_AssociationFailure(t *testing.T) {
 		Status: 403, Body: `{"error":["forbidden"]}`,
 	})
 	c := newTestClient(t, srv.Server)
-	res, resp, err := c.Policies.PushRevision(context.Background(), []byte(`{"name":"web"}`), "prod", nil)
+	res, resp, err := c.Policies.PushRevision(context.Background(), []byte(`{"name":"web","revision_id":"r1","run_list":[],"cookbook_locks":{}}`), "prod", nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("err = %v, want ErrForbidden", err)
 	}
@@ -754,5 +790,64 @@ func TestPushRevision_AssociationFailure(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != 403 {
 		t.Errorf("response = %+v, want the 403", resp)
+	}
+}
+
+// erchef validates a policy revision (oc_chef_policy_revision
+// VALIDATION_CONSTRAINTS) only when the group PUT arrives, after every
+// artifact is uploaded. PushRevision checks the same rules first, so a lock
+// the server would refuse leaves nothing behind.
+func TestPushRevision_RejectsALockTheServerWouldRefuse(t *testing.T) {
+	cb := pushTestCookbook(t, "nginx")
+	id, _ := cb.Identifiers()
+	lock := func(fields string, cookbookLock string) []byte {
+		return []byte(`{"name":"web"` + fields + `,"cookbook_locks":{"nginx":` + cookbookLock + `}}`)
+	}
+	good := `{"version":"1.0.0","identifier":"` + id + `"}`
+	for _, tc := range []struct {
+		name string
+		lock []byte
+		want string
+	}{
+		{"no revision id", lock(`,"run_list":["recipe[nginx::default]"]`, good), "revision_id"},
+		{"no run list", lock(`,"revision_id":"r1"`, good), "run_list"},
+		{"unqualified recipe", lock(`,"revision_id":"r1","run_list":["recipe[nginx]"]`, good), "recipe[nginx]"},
+		{"role in run list", lock(`,"revision_id":"r1","run_list":["role[web]"]`, good), "role[web]"},
+		{"no cookbook locks", []byte(`{"name":"web","revision_id":"r1","run_list":[]}`), "cookbook_locks"},
+		{"lock without version", lock(`,"revision_id":"r1","run_list":[]`, `{"identifier":"`+id+`"}`), "version"},
+		{"lock with bad version", lock(`,"revision_id":"r1","run_list":[]`, `{"version":"1.x","identifier":"`+id+`"}`), "1.x"},
+		{"bad dotted decimal", lock(`,"revision_id":"r1","run_list":[]`, `{"version":"1.0.0","identifier":"`+id+`","dotted_decimal_identifier":"abc"}`), "abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := cinctest.New(t)
+			srv.Handle("GET /organizations/o/cookbook_artifacts", cinctest.Route{Body: `{}`})
+			c := newTestClient(t, srv.Server)
+			_, _, err := c.Policies.PushRevision(context.Background(), tc.lock, "prod", map[string]*LocalCookbook{"nginx": cb})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one naming %s", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("a valid lock is accepted", func(t *testing.T) {
+		var uploaded []string
+		c := newTestClient(t, pushServer(t, &uploaded).Server)
+		l := lock(`,"revision_id":"r1","run_list":["recipe[nginx::default]"]`, `{"version":"1.0.0","identifier":"`+id+`"}`)
+		if _, _, err := c.Policies.PushRevision(context.Background(), l, "prod", map[string]*LocalCookbook{"nginx": cb}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// A lock's version is checked as erchef's valid_cookbook_constraint does: a
+// version, optionally after a constraint operator.
+func TestValidLockVersion(t *testing.T) {
+	for v, want := range map[string]bool{
+		"1.0.0": true, "1.0": true, "= 1.0.0": true, ">= 2.1": true,
+		"1": false, "1.x": false, "= x": false, "": false,
+	} {
+		if got := validLockVersion(v); got != want {
+			t.Errorf("validLockVersion(%q) = %v, want %v", v, got, want)
+		}
 	}
 }

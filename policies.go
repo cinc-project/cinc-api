@@ -22,18 +22,31 @@ type PolicyRevisions struct {
 }
 
 // PolicyRevision is a single Policyfile document. The shape mirrors the
-// well-known top-level fields; unknown fields are preserved through the
-// Extra map when round-tripping.
+// well-known top-level fields; fields it does not model are dropped when
+// decoding. Use Client.Do to round-trip a revision unchanged.
 type PolicyRevision struct {
 	RevisionID           string                  `json:"revision_id,omitempty"`
 	Name                 string                  `json:"name,omitempty"`
-	RunList              []string                `json:"run_list,omitempty"`
+	RunList              []string                `json:"run_list"`
 	NamedRunLists        map[string][]string     `json:"named_run_lists,omitempty"`
-	CookbookLocks        map[string]CookbookLock `json:"cookbook_locks,omitempty"`
+	CookbookLocks        map[string]CookbookLock `json:"cookbook_locks"`
 	DefaultAttributes    map[string]any          `json:"default_attributes,omitempty"`
 	OverrideAttributes   map[string]any          `json:"override_attributes,omitempty"`
 	SolutionDependencies json.RawMessage         `json:"solution_dependencies,omitempty"`
 	IncludedPolicyLocks  []json.RawMessage       `json:"included_policy_locks,omitempty"`
+}
+
+// MarshalJSON encodes the revision with run_list and cookbook_locks always
+// present, as an empty array and object when unset: the server requires both
+// and rejects null.
+func (p PolicyRevision) MarshalJSON() ([]byte, error) {
+	type alias PolicyRevision
+	a := alias(p)
+	a.RunList = nonNil(a.RunList)
+	if a.CookbookLocks == nil {
+		a.CookbookLocks = map[string]CookbookLock{}
+	}
+	return json.Marshal(a)
 }
 
 // CookbookLock is a single cookbook pinning inside a PolicyRevision.
@@ -212,8 +225,9 @@ type PushResult struct {
 // name LocalCookbookFromDir took from its directory (its metadata declares
 // none) is renamed to the lock's; one whose name or metadata name is a
 // different cookbook is an error, as is one whose version differs from the
-// lock's, since the lock would then pin an artifact that is not the cookbook
-// it describes. Every cookbook to be uploaded is checked after the artifact
+// lock's, or whose files do not hash to the lock's identifier (and
+// dotted_decimal_identifier, when the lock records one), since the lock would
+// then pin an artifact that is not the cookbook it describes. Every cookbook to be uploaded is checked after the artifact
 // list and before the first upload, so a failed check changes nothing on the
 // server.
 //
@@ -224,6 +238,9 @@ type PushResult struct {
 func (s *PoliciesService) PushRevision(ctx context.Context, lockJSON []byte, group string, cookbooks map[string]*LocalCookbook) (*PushResult, *Response, error) {
 	lock, err := ParsePolicyfileLock(lockJSON)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateLockForPush(lock); err != nil {
 		return nil, nil, err
 	}
 	missing, present, _, err := s.partitionArtifacts(ctx, lock)
@@ -320,6 +337,17 @@ func lockArtifact(name string, cl CookbookLock, cb *LocalCookbook) (*LocalCookbo
 	a.Name, a.Metadata.Name = name, name
 	if cl.Version != "" && a.Version != cl.Version {
 		return nil, fmt.Errorf("cinc: the cookbook supplied for lock %q is version %q, but the lock pins %q", name, a.Version, cl.Version)
+	}
+	// The identifier is a hash of the files, and the server never replaces an
+	// artifact, so other content uploaded under it would stay pinned for good.
+	id, dotted := a.Identifiers()
+	if id != cl.Identifier {
+		return nil, fmt.Errorf("cinc: the cookbook supplied for lock %q has identifier %s, but the lock pins %s; "+
+			"its files changed since the lock was made (re-run chef install / chef update)", name, id, cl.Identifier)
+	}
+	if cl.DottedDecimalIdentifier != "" && dotted != cl.DottedDecimalIdentifier {
+		return nil, fmt.Errorf("cinc: the cookbook supplied for lock %q has dotted decimal identifier %s, but the lock records %s",
+			name, dotted, cl.DottedDecimalIdentifier)
 	}
 	return &a, nil
 }
