@@ -154,11 +154,16 @@ func pushPolicy(t *testing.T, c *cinc.Client, groups ...string) pushedPolicy {
 func pushPolicyWith(t *testing.T, c *cinc.Client, cookbook func(name string) *cinc.LocalCookbook, groups ...string) pushedPolicy {
 	t.Helper()
 	p := pushedPolicy{
-		name:       uniqueName(t, "policy"),
-		revision:   randomHex(t, 32),
-		cookbook:   uniqueName(t, "cookbook"),
-		identifier: randomHex(t, 20),
+		name:     uniqueName(t, "policy"),
+		revision: randomHex(t, 32),
+		cookbook: uniqueName(t, "cookbook"),
 	}
+	// The lock pins the cookbook's own content identifiers, as chef install
+	// writes them: PushRevision refuses a cookbook whose files hash to
+	// anything else.
+	cb := cookbook(p.cookbook)
+	var dotted string
+	p.identifier, dotted = cb.Identifiers()
 	// Cleanups run last-registered first: groups, then the policy, then the
 	// artifact the policy revision refers to.
 	cleanup(t, "cookbook artifact "+p.cookbook, func(ctx context.Context) error {
@@ -184,7 +189,7 @@ func pushPolicyWith(t *testing.T, c *cinc.Client, cookbook func(name string) *ci
 		"cookbook_locks":{"` + p.cookbook + `":{
 			"version":"1.0.0",
 			"identifier":"` + p.identifier + `",
-			"dotted_decimal_identifier":"1.2.3",
+			"dotted_decimal_identifier":"` + dotted + `",
 			"cache_key":null,
 			"source_options":{"path":"."}
 		}},
@@ -192,7 +197,7 @@ func pushPolicyWith(t *testing.T, c *cinc.Client, cookbook func(name string) *ci
 		"override_attributes":{},
 		"solution_dependencies":{"Policyfile":[],"dependencies":{}}
 	}`)
-	cookbooks := map[string]*cinc.LocalCookbook{p.cookbook: cookbook(p.cookbook)}
+	cookbooks := map[string]*cinc.LocalCookbook{p.cookbook: cb}
 	for _, group := range groups {
 		res, _, err := c.Policies.PushRevision(t.Context(), lockJSON, group, cookbooks)
 		if err != nil {

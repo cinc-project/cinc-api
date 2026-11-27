@@ -2,6 +2,7 @@ package cinc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -19,7 +20,59 @@ var (
 	// cookbookLockNameRE is chef_regex's cookbook_name (NAME_REGEX), which
 	// erchef applies to each cookbook_locks key.
 	cookbookLockNameRE = regexp.MustCompile(`^[.A-Za-z0-9_-]+$`)
+	// policyRecipeRE is chef_regex's policy_fully_qualified_recipe: a policy
+	// run list names only recipe[cookbook::recipe], with no roles, bare
+	// cookbooks or version pins.
+	policyRecipeRE = regexp.MustCompile(`^recipe\[[.A-Za-z0-9_-]+::[.A-Za-z0-9_-]+\]$`)
 )
+
+// validateLockForPush applies the rest of the rules erchef checks a policy
+// revision against (oc_chef_policy_revision VALIDATION_CONSTRAINTS) when it is
+// PUT to a policy group, on top of validatePolicyfileLock's: a revision id, a
+// run_list of fully qualified recipes, cookbook_locks, and a valid version
+// (and dotted_decimal_identifier, when given) on every lock. ParsePolicyfileLock
+// leaves these to the caller; PushRevision cannot, because the server only
+// checks them after every artifact has been uploaded.
+func validateLockForPush(lock *PolicyRevision) error {
+	if lock.RevisionID == "" {
+		return errors.New("cinc: policyfile lock has no revision_id")
+	}
+	if lock.RunList == nil {
+		return errors.New("cinc: policyfile lock has no run_list")
+	}
+	for _, item := range lock.RunList {
+		if !policyRecipeRE.MatchString(item) {
+			return fmt.Errorf("cinc: policyfile lock run_list item %q is not a fully qualified recipe[cookbook::recipe]", item)
+		}
+	}
+	if lock.CookbookLocks == nil {
+		return errors.New("cinc: policyfile lock has no cookbook_locks")
+	}
+	for _, name := range sortedKeys(lock.CookbookLocks) {
+		cl := lock.CookbookLocks[name]
+		if cl.Version == "" {
+			return fmt.Errorf("cinc: cookbook lock %q has no version", name)
+		}
+		if !validLockVersion(cl.Version) {
+			return fmt.Errorf("cinc: cookbook lock %q has an invalid version %q", name, cl.Version)
+		}
+		if cl.DottedDecimalIdentifier != "" && !validLockVersion(cl.DottedDecimalIdentifier) {
+			return fmt.Errorf("cinc: cookbook lock %q has an invalid dotted_decimal_identifier %q", name, cl.DottedDecimalIdentifier)
+		}
+	}
+	return nil
+}
+
+// validLockVersion mirrors chef_cookbook_version:valid_cookbook_constraint,
+// which erchef applies to a lock's version: an x.y[.z] version, optionally
+// after a constraint operator.
+func validLockVersion(v string) bool {
+	if m := chefConstraintRe.FindStringSubmatch(v); m != nil {
+		v = m[2]
+	}
+	_, err := parseChefVersion(v)
+	return err == nil
+}
 
 // ParsePolicyfileLock unmarshals the bytes of a Policyfile.lock.json into a
 // PolicyRevision, which models the lock's structure (name, run lists, cookbook

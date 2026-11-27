@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -279,5 +280,21 @@ func TestCookbookLock_GitSubdir(t *testing.T) {
 				t.Fatalf("GitSubdir() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// erchef requires run_list and cookbook_locks on every revision, empty or not.
+func TestPolicyRevision_MarshalJSON_RequiredKeysAlwaysPresent(t *testing.T) {
+	b, err := json.Marshal(PolicyRevision{RevisionID: "r", Name: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"run_list":[]`, `"cookbook_locks":{}`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("marshaled %s, want %s", b, want)
+		}
+	}
+	if strings.Contains(string(b), "named_run_lists") {
+		t.Errorf("marshaled %s, want optional fields still omitted", b)
 	}
 }
