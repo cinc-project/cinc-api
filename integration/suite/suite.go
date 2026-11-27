@@ -78,6 +78,7 @@ var cases = []testCase{
 	{"keys/rename", testKeyRename},
 	{"keys/create-defaults", testKeyCreateDefaults},
 	{"groups/lifecycle", testGroupLifecycle},
+	{"groups/rename", testGroupRename},
 	{"groups/member-add-remove", testGroupMemberAddRemove},
 	{"groups/member-add-drops-unknown", testGroupMemberAddDropsUnknown},
 	{"containers/lifecycle", testContainerLifecycle},

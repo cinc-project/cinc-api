@@ -32,7 +32,7 @@ func testGroupLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 		t.Fatalf("%s missing from group list", group)
 	}
 
-	updated, _, err := c.Groups.Update(ctx, &cinc.Group{Name: group, Clients: []string{client}, Groups: []string{inner}})
+	updated, _, err := c.Groups.Update(ctx, group, &cinc.Group{Clients: []string{client}, Groups: []string{inner}})
 	if err != nil {
 		t.Fatalf("Update (add members): %v", err)
 	}
@@ -49,7 +49,7 @@ func testGroupLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 		t.Fatalf("after update: group = %+v, want client %s and group %s", again, client, inner)
 	}
 
-	if _, _, err := c.Groups.Update(ctx, &cinc.Group{Name: group}); err != nil {
+	if _, _, err := c.Groups.Update(ctx, group, &cinc.Group{}); err != nil {
 		t.Fatalf("Update (remove members): %v", err)
 	}
 	emptied, _, err := c.Groups.Get(ctx, group)
@@ -65,6 +65,40 @@ func testGroupLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	}
 	if _, _, err := c.Groups.Get(ctx, group); !errors.Is(err, cinc.ErrNotFound) {
 		t.Fatalf("Get after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+// testGroupRename renames a group through Update: the path carries the old
+// name, the body's groupname the new one. The members move with it.
+func testGroupRename(t *testing.T, _ Target, c *cinc.Client) {
+	ctx := t.Context()
+	client := newClient(t, c)
+	oldName := newGroup(t, c)
+	newName := uniqueName(t, "group")
+	cleanup(t, "group "+newName, func(ctx context.Context) error {
+		_, err := c.Groups.Delete(ctx, newName)
+		return err
+	})
+	if _, _, err := c.Groups.Update(ctx, oldName, &cinc.Group{Clients: []string{client}}); err != nil {
+		t.Fatalf("Update (add member): %v", err)
+	}
+
+	renamed, _, err := c.Groups.Update(ctx, oldName, &cinc.Group{Name: newName, Clients: []string{client}})
+	if err != nil {
+		t.Fatalf("Update to rename: %v", err)
+	}
+	if renamed.Name != newName {
+		t.Fatalf("Update = %+v, want name %s", renamed, newName)
+	}
+	if _, _, err := c.Groups.Get(ctx, oldName); !errors.Is(err, cinc.ErrNotFound) {
+		t.Fatalf("Get old name after rename: err = %v, want ErrNotFound", err)
+	}
+	got, _, err := c.Groups.Get(ctx, newName)
+	if err != nil {
+		t.Fatalf("Get new name after rename: %v", err)
+	}
+	if got.Name != newName || !reflect.DeepEqual(got.Clients, []string{client}) {
+		t.Fatalf("after rename: group = %+v, want %s with client %s", got, newName, client)
 	}
 }
 

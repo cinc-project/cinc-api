@@ -80,7 +80,7 @@ func TestGroups_Update_DecodesEchoedPutBody(t *testing.T) {
 		Body: `{"groupname":"devs","actors":{"users":["alice"],"clients":[],"groups":[]}}`,
 	})
 	c := newTestClient(t, srv.Server)
-	got, _, err := c.Groups.Update(context.Background(), &Group{Name: "devs", Users: []string{"alice"}})
+	got, _, err := c.Groups.Update(context.Background(), "devs", &Group{Users: []string{"alice"}})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}

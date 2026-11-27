@@ -143,6 +143,7 @@ func startTarget(name string, opts server.Options, hc *http.Client) (suite.Targe
 			// (oc_chef_wm_base:update_from_json -> handle_rename, 201 with Location).
 			"clients/rename": "cinc-server-ng v0.22.0 answers a renaming client PUT with 200 and stores the new body under the old name; the old name still resolves and the new one 404s",
 			"users/rename":   "cinc-server-ng v0.22.0 answers a renaming user PUT with 200 and stores the new body under the old name; the old name still resolves and the new one 404s",
+			"groups/rename":  "cinc-server-ng v0.22.0 answers a renaming group PUT with 200 and stores the new body under the old name; the old name still resolves and the new one 404s",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()

@@ -47,7 +47,7 @@ following endpoint families are implemented:
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload; `CookbookArtifactListEntry.Has(identifier)` |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
-| `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete / AddMembers / RemoveMembers   |
+| `c.Groups`           | `/groups`                             | List / Get / Create / Update (can rename) / Delete / AddMembers / RemoveMembers |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
 | `c.License`          | `/license`                            | Get (node-license usage)                                             |
 | `c.Nodes`            | `/nodes`                              | List / Get / Create / Update / Modify / Delete                       |
@@ -138,9 +138,10 @@ model, so callers don't re-encode server conventions:
   PUT is a full update, so this re-sends the user's current fields with it.
 - `SuperuserName` — `"pivotal"`, the built-in superuser that creating orgs,
   `/authenticate_user` and invitation-free org membership are reserved to.
-- `Clients.Update(name, cl)` and `Users.Update(name, u)` — the path is the
-  current name and the body the new values, so setting a different
-  `Name`/`Username` renames the client or user (the server answers 201).
+- `Clients.Update(name, cl)`, `Users.Update(name, u)` and
+  `Groups.Update(name, g)` — the path is the current name and the body the
+  new values, so setting a different `Name`/`Username` (for a group, `Name`
+  or `GroupName`) renames the client, user or group (the server answers 201).
   Chef Server keeps no keys across a client rename; `Reregister` gives the
   renamed client a new `default` key.
 - `Clients.Reregister(name)` — regenerate a client's `default` key in place
