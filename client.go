@@ -65,6 +65,13 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	if err != nil || base.Host == "" {
 		return nil, fmt.Errorf("cinc: invalid ServerURL %q", cfg.ServerURL)
 	}
+	// The organization comes from Org, and every request path is absolute
+	// from the server root, so a path here (most often a pasted
+	// .../organizations/<org> URL) would be prefixed onto every request.
+	if base.Path != "" || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+		return nil, fmt.Errorf("cinc: ServerURL %q must be scheme://host[:port] with no path, query or fragment; "+
+			"use ParseServerURL to split an https://host/organizations/<org> URL into ServerURL and Org", cfg.ServerURL)
+	}
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)

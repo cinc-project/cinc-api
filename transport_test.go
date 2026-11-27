@@ -330,8 +330,14 @@ func TestRetry_503HonoursRetryAfter(t *testing.T) {
 			if _, _, err := do[map[string]any](context.Background(), c, "POST", "/users", map[string]any{}); err != nil {
 				t.Fatal(err)
 			}
-			if len(*sleeps) != 1 || (*sleeps)[0] != tc.want {
-				t.Errorf("waits = %v, want [%v]", *sleeps, tc.want)
+			// Without a usable Retry-After the jittered backoff applies: the
+			// upper half of the base delay.
+			ok := len(*sleeps) == 1 && (*sleeps)[0] == tc.want
+			if tc.want == retryBaseDelay {
+				ok = len(*sleeps) == 1 && (*sleeps)[0] >= retryBaseDelay/2 && (*sleeps)[0] < retryBaseDelay
+			}
+			if !ok {
+				t.Errorf("waits = %v, want [%v] (jittered over its upper half when it is the backoff)", *sleeps, tc.want)
 			}
 		})
 	}
