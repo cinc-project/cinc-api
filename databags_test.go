@@ -276,7 +276,7 @@ func encryptedEcho(t *testing.T, item DataBagItem) string {
 
 func TestDataBagItems_GetDecrypted(t *testing.T) {
 	secret := []byte("s3cret")
-	plain := DataBagItem{"id": "db", "password": "hunter2", "port": 5432.0}
+	plain := DataBagItem{"id": "db", "password": "hunter2", "port": json.Number("5432")}
 	enc, err := plain.Encrypt(secret)
 	if err != nil {
 		t.Fatal(err)

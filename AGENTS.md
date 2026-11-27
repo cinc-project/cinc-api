@@ -153,6 +153,11 @@ down.
   `any(Attributes{}).(map[string]any)` is false even though the two share
   an underlying type. Attribute walking goes through `asAttributeMap`,
   which accepts both — do not reintroduce a bare assertion.
+- `Attributes` and `DataBagItem` decode numbers as `json.Number` at every
+  depth (their `UnmarshalJSON`), and so do decrypted data bag values, so an
+  integer above 2^53 survives a read-modify-write. Code reading those values
+  must accept `json.Number` (see `attributeScalar`, `wrapperVersion`); a
+  `.(float64)` assertion on one silently fails.
 - `omitempty` does **not** elide nested struct values in Go's
   `encoding/json`. Use `omitzero` (Go 1.24+) or drop the tag when the
   field is a value-type struct.

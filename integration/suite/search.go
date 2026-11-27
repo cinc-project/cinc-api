@@ -246,7 +246,7 @@ func testSearchDataBagItems(t *testing.T, _ Target, c *cinc.Client) {
 	ctx := t.Context()
 	bag := newDataBag(t, c)
 	want := map[string]cinc.DataBagItem{}
-	for i, port := range []float64{8080, 9090} {
+	for i, port := range []json.Number{"8080", "9090"} {
 		id := uniqueName(t, fmt.Sprintf("item%d", i))
 		item := cinc.DataBagItem{"id": id, "port": port, "tags": []any{"a"}}
 		if _, _, err := c.DataBags.Items(bag).Create(ctx, item); err != nil {
@@ -303,7 +303,7 @@ func testSearchDataBagItems(t *testing.T, _ Target, c *cinc.Client) {
 			return fmt.Errorf("partial data bag search returned %v, want the one item on port 9090", projected)
 		}
 		for id, item := range projected {
-			if !reflect.DeepEqual(item, cinc.DataBagItem{"id": id, "port": 9090.0}) || want[id]["port"] != 9090.0 {
+			if !reflect.DeepEqual(item, cinc.DataBagItem{"id": id, "port": json.Number("9090")}) || want[id]["port"] != json.Number("9090") {
 				return fmt.Errorf("partial data bag item = %v, want id and port 9090 only", item)
 			}
 		}

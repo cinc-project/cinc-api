@@ -178,6 +178,21 @@ type wrapper struct {
 	hmac          string
 }
 
+// wrapperVersion reads a wrapper's "version", which is a json.Number in an
+// item decoded from the server and a float64 or int in one built in Go.
+func wrapperVersion(v any) (int, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case float64:
+		return int(n), n == float64(int(n))
+	case int:
+		return n, true
+	}
+	return 0, false
+}
+
 // parseWrapper validates that v is a well-formed encryption wrapper and
 // extracts its fields. It returns an ErrNotEncrypted-wrapped error otherwise.
 func parseWrapper(v any) (wrapper, error) {
@@ -185,11 +200,10 @@ func parseWrapper(v any) (wrapper, error) {
 	if !ok {
 		return wrapper{}, fmt.Errorf("%w: value is not an encryption wrapper", ErrNotEncrypted)
 	}
-	verF, ok := m["version"].(float64)
+	ver, ok := wrapperVersion(m["version"])
 	if !ok {
-		return wrapper{}, fmt.Errorf("%w: wrapper has no numeric \"version\"", ErrNotEncrypted)
+		return wrapper{}, fmt.Errorf("%w: wrapper has no integer \"version\"", ErrNotEncrypted)
 	}
-	ver := int(verF)
 	if ver != 1 && ver != 2 && ver != 3 {
 		return wrapper{}, fmt.Errorf("%w: unsupported wrapper version %d", ErrNotEncrypted, ver)
 	}
@@ -259,8 +273,10 @@ func boxValue(v any) ([]byte, error) {
 
 // unboxValue parses encrypted-then-decrypted JSON and returns the boxed value.
 func unboxValue(plaintext []byte) (any, error) {
-	var box map[string]any
-	if err := json.Unmarshal(plaintext, &box); err != nil {
+	// Decrypted values keep their numbers as json.Number, like the rest of
+	// a DataBagItem.
+	box, err := decodeObject(plaintext)
+	if err != nil {
 		return nil, fmt.Errorf("%w: plaintext is not a json_wrapper object: %v", ErrDataBagAuth, err)
 	}
 	v, ok := box[jsonWrapperKey]

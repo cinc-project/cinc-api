@@ -97,10 +97,10 @@ func TestDataBagItem_EncryptDecrypt_RoundTrip(t *testing.T) {
 	orig := DataBagItem{
 		"id":     "creds",
 		"str":    "s3cret-password",
-		"num":    float64(42),
+		"num":    json.Number("42"),
 		"flag":   true,
-		"nested": map[string]any{"host": "db.local", "port": float64(5432)},
-		"list":   []any{"a", float64(1), false},
+		"nested": map[string]any{"host": "db.local", "port": json.Number("5432")},
+		"list":   []any{"a", json.Number("1"), false},
 	}
 
 	enc, err := orig.Encrypt(secret)
@@ -178,8 +178,9 @@ func TestDataBagItem_Decrypt_ChefCompat(t *testing.T) {
 		{"v1-string", fixtureV1String, "hello world"},
 		{"v2-string", fixtureV2String, "hello world"},
 		{"v3-string", fixtureV3String, "hello world"},
-		{"v3-int", fixtureV3Int, float64(42)},
-		{"v3-obj", fixtureV3Obj, map[string]any{"a": float64(1), "b": []any{true, false, "x"}}},
+		// Decrypted numbers are json.Number, as in any decoded DataBagItem.
+		{"v3-int", fixtureV3Int, json.Number("42")},
+		{"v3-obj", fixtureV3Obj, map[string]any{"a": json.Number("1"), "b": []any{true, false, "x"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -364,8 +365,8 @@ func TestDataBagItem_Encrypt_WrapperLookalikesArePlaintext(t *testing.T) {
 		"id":         "x",
 		"no-version": map[string]any{"encrypted_data": "a", "iv": "b", "auth_tag": "c"},
 		"string-ver": map[string]any{"version": "3", "encrypted_data": "a", "iv": "b", "auth_tag": "c"},
-		"v4":         map[string]any{"version": 4.0, "encrypted_data": "a", "iv": "b"},
-		"v3-no-tag":  map[string]any{"version": 3.0, "encrypted_data": "a", "iv": "b"},
+		"v4":         map[string]any{"version": json.Number("4"), "encrypted_data": "a", "iv": "b"},
+		"v3-no-tag":  map[string]any{"version": json.Number("3"), "encrypted_data": "a", "iv": "b"},
 		"string":     "version 3",
 	}
 	enc, err := in.Encrypt(secret)
