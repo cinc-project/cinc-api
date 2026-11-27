@@ -32,9 +32,10 @@ type User struct {
 	PublicKey string `json:"public_key,omitempty"`
 }
 
-// UserCreateResult is the response from POST /users. The ChefKey.PrivateKey
-// is returned **only** when the user is created with CreateKey=true; capture
-// it before the response is dropped.
+// UserCreateResult is the response from POST /users. ChefKey.PrivateKey holds
+// the server-generated private key, which Create asks for unless the User
+// carries a PublicKey. The server keeps no copy: capture it before the
+// response is dropped.
 type UserCreateResult struct {
 	URI     string  `json:"uri,omitempty"`
 	ChefKey ChefKey `json:"chef_key"`

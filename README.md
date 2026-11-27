@@ -8,14 +8,23 @@ A modern, idiomatic Go client for the Chef Infra / CINC Server API.
 
 ## Usage
 
-    key, _ := cinc.LoadKeyFile("/etc/chef/client.pem")
+    key, err := cinc.LoadKeyFile("/etc/chef/client.pem")
+    if err != nil {
+        return err
+    }
     c, err := cinc.NewClient(cinc.Config{
         ServerURL:  "https://chef.example.com",
         Org:        "myorg",
         ClientName: "node1",
         Key:        key,
     })
-    node, _, err := c.Nodes.Get(context.Background(), "web01")
+    if err != nil {
+        return err
+    }
+    node, _, err := c.Nodes.Get(ctx, "web01")
+    if errors.Is(err, cinc.ErrNotFound) {
+        // no such node
+    }
 
 ## Status
 
@@ -29,11 +38,8 @@ following endpoint families are implemented:
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
-| `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
-| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
-| `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload; `CookbookArtifactListEntry.Has(identifier)` |
-| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
+| `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Environments`     | `/environments`                       | List / Get / Create / Update / Delete / ListCookbooks / GetCookbook / CookbookVersions / ListNodes / ListRecipes / RoleRunList |
 | `c.Groups`           | `/groups`                             | List / Get / Create / Update / Delete / AddMembers / RemoveMembers   |
 | `c.Keys`             | `/users/U/keys`, `/clients/C/keys`    | `User(name)` / `Client(name)` → List / Get / Create / Update / Delete |
@@ -127,7 +133,10 @@ model, so callers don't re-encode server conventions:
 - `Clients.Reregister(name)` — regenerate a client's `default` key and return
   the new private key (creating one if the client has none).
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
-  `Policyfile.lock.json` into a `PolicyRevision`.
+  `Policyfile.lock.json` into a `PolicyRevision`. The policy name, revision
+  id, cookbook lock names and identifiers are checked against the patterns
+  Chef Server validates them with, so a returned name is safe to use in a
+  path or generated config.
 - `CompareCookbookVersions(a, b)` orders cookbook versions the way Chef does
   (numeric `x.y[.z]`, so `10.0.0` is newer than `9.0.0`); anything that is not
   a valid version sorts below every valid one. Every version list the client
@@ -136,10 +145,6 @@ model, so callers don't re-encode server conventions:
   and trimmed to `num_versions`, whatever the server sent, and an invalid
   `num_versions` is rejected before a request is made. `LatestVersion` is the
   `_latest` version alias.
-  `Policyfile.lock.json` into a `PolicyRevision`. The policy name, revision
-  id, cookbook lock names and identifiers are checked against the patterns
-  Chef Server validates them with, so a returned name is safe to use in a
-  path or generated config.
 - `CookbookLock` accessors — `Origin()` (classify a lock's `source_options` as
   `path`/`artifactserver`/`git`/`chef_server` and return its location),
   `PinnedVersion()` (the `source_options` version, falling back to the lock's
@@ -216,7 +221,11 @@ model, so callers don't re-encode server conventions:
   filled by `LoadCookbookMetadata`, so anything computed in `metadata.rb`
   needs a `metadata.json` or an edit to `Metadata`. An empty `version` uses
   the metadata's version (an error if `metadata.rb` computes it); one that
-  disagrees with it is an error.
+  disagrees with it is an error. `LocalCookbookFromDir(dir, version,
+  SkipChefignore())` keeps the files chefignore would drop (every other
+  selection rule still applies), for packaging a cookbook as-is; chef-cli
+  always applies chefignore, so such a cookbook's `Identifiers()` are not the
+  ones a `Policyfile.lock.json` should carry.
 - `UnwrapSearchRow(row)` — the object a search row describes: the `data` of
   a partial-search row (`{"url", "data"}`), the `raw_data` of the
   `Chef::DataBagItem` envelope a full data bag search wraps each item in, and
@@ -234,11 +243,6 @@ model, so callers don't re-encode server conventions:
   `users`/`clients`/`groups` arrays (GET) or nested under an `actors` object
   (the PUT body, which erchef echoes back). The flat `actors` array a GET also
   carries is ignored, since the typed lists already hold its names.
-  disagrees with it is an error. `LocalCookbookFromDir(dir, version,
-  SkipChefignore())` keeps the files chefignore would drop (every other
-  selection rule still applies), for packaging a cookbook as-is; chef-cli
-  always applies chefignore, so such a cookbook's `Identifiers()` are not the
-  ones a `Policyfile.lock.json` should carry.
 - `LocalCookbook.Files()` / `LocalCookbook.Identifiers()` — the files
   `LocalCookbookFromDir` selected (cookbook-relative `Path`, `DiskPath`, MD5
   `Checksum`), sorted by path, for callers that archive or copy a cookbook;
