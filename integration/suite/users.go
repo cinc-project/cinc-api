@@ -32,7 +32,7 @@ func testUserLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	// is checked through a fresh Get rather than Update's return value.
 	got.DisplayName = "Renamed " + name
 	got.LastName = "Updated"
-	if _, _, err := c.Users.Update(ctx, got); err != nil {
+	if _, err := c.Users.Update(ctx, got); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	again, _, err := c.Users.Get(ctx, name)

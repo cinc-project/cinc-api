@@ -81,6 +81,10 @@ file new ones at cinc-project/cinc-server-ng):
 - **cinc-server-ng** encodes `/_stats` JSON differently: numeric values where
   erchef sends strings, labels as an array, histograms summarized on the
   family (cinc-server-ng#243). `stats/get` is a gap there until it is fixed.
+- **cinc-server-ng** answers `PUT /users/<name>` with the whole user; erchef
+  sends only `{"uri"}` (`oc_chef_wm_named_user:finalize_update_body`), which
+  is why `Users.Update` returns no `*User`. Client, org and group PUTs echo
+  the object on both.
 - **Neither server** rejects a cookbook manifest with bare file names
   (`default.rb` instead of `recipes/default.rb`), but chef-client misfiles
   every such entry, so only a converge would show it.

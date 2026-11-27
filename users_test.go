@@ -91,10 +91,13 @@ func TestUsers_Create_ServerGeneratedKey(t *testing.T) {
 	}
 }
 
+// erchef answers a user PUT with only {"uri": ...} (oc_chef_wm_named_user
+// finalize_update_body, kept for opscode-account compatibility), so there is
+// no updated user to return.
 func TestUsers_Update(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("PUT /users/alice", cinctest.Route{
-		Body: `{"username":"alice","display_name":"Alice Renamed","email":"alice@example.com"}`,
+		Body: `{"uri":"https://chef.example.com/users/alice"}`,
 		Assert: func(t *testing.T, _ *http.Request, body []byte) {
 			var got map[string]any
 			json.Unmarshal(body, &got)
@@ -104,14 +107,14 @@ func TestUsers_Update(t *testing.T) {
 		},
 	})
 	c := newTestClient(t, srv.Server)
-	updated, _, err := c.Users.Update(context.Background(), &User{
+	resp, err := c.Users.Update(context.Background(), &User{
 		UserName: "alice", DisplayName: "Alice Renamed", Email: "alice@example.com",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.DisplayName != "Alice Renamed" {
-		t.Errorf("DisplayName = %q", updated.DisplayName)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d", resp.StatusCode)
 	}
 }
 
