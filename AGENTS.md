@@ -149,6 +149,12 @@ down.
   required `actors: {users, clients, groups}` shape, and
   `Group.UnmarshalJSON` reads that shape back (an `actors` object), so a
   PUT-shaped group file does not decode to an empty group.
+- ACL reads use `?detail=granular`, so an `ACE` carries `users` and
+  `clients` apart with `actors: []`. A write with users or clients must send
+  both lists plus `actors: []` (erchef `oc_chef_authz_acl:acl_spec`,
+  `validate_actors_clients_users`); a flat `actors` list naming a user and
+  a client that share a name is a 422. Grant/Revoke take `ACLMembers` by
+  kind for that reason — do not merge the lists back into `actors`.
 - Any slice Chef validates as an array must serialize as `[]`, not
   `null`: `groups.go:nonNil`, `run_list` in `Node`/`Role.MarshalJSON`,
   and `normal.tags` in `SetTags`.
