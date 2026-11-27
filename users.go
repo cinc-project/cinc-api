@@ -12,7 +12,7 @@ const SuperuserName = "pivotal"
 // User is a global Chef Server user account. These live at /users (not under
 // any one org) and represent humans who can be added to organizations.
 type User struct {
-	UserName    string `json:"username,omitempty"`
+	Username    string `json:"username,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Email       string `json:"email,omitempty"`
 	FirstName   string `json:"first_name,omitempty"`
@@ -70,14 +70,14 @@ func (s *UsersService) Create(ctx context.Context, u *User) (*UserCreateResult, 
 	return ptrOrNil(r, err), resp, err
 }
 
-// Update replaces a user's metadata. Use UserName as the lookup key; other
+// Update replaces a user's metadata. Use Username as the lookup key; other
 // fields are the new values.
 //
 // The server answers with only the user's URI (unlike clients, orgs and
 // groups, whose PUT echoes the object), so there is nothing to return but
 // the response; Get the user to read back what was stored.
 func (s *UsersService) Update(ctx context.Context, u *User) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "PUT", "/users/"+esc(u.UserName), u)
+	_, resp, err := do[map[string]any](ctx, s.client, "PUT", "/users/"+esc(u.Username), u)
 	return resp, err
 }
 

@@ -16,7 +16,7 @@ func testUserLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.UserName != name || got.Email != name+"@example.com" || got.FirstName != "Test" {
+	if got.Username != name || got.Email != name+"@example.com" || got.FirstName != "Test" {
 		t.Fatalf("user = %+v", got)
 	}
 
@@ -73,7 +73,7 @@ func newUser(t *testing.T, c *cinc.Client) (string, string) {
 		return err
 	})
 	res, _, err := c.Users.Create(t.Context(), &cinc.User{
-		UserName:    name,
+		Username:    name,
 		DisplayName: name,
 		Email:       name + "@example.com",
 		FirstName:   "Test",
@@ -123,7 +123,7 @@ func testUserCreateKeyDefault(t *testing.T, tgt Target, c *cinc.Client) {
 		return err
 	})
 	res, _, err := c.Users.Create(ctx, &cinc.User{
-		UserName: name, DisplayName: name, Email: name + "@example.com", Password: userPassword(name),
+		Username: name, DisplayName: name, Email: name + "@example.com", Password: userPassword(name),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

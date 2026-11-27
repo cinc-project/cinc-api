@@ -32,7 +32,7 @@ func testSearchQuery(t *testing.T, _ Target, c *cinc.Client) {
 	// server's earlier runs), so check that ours are among the results
 	// rather than counting them.
 	eventually(t, 30*time.Second, func() error {
-		rows, err := c.Search.SearchAll(ctx, "node", "*:*")
+		rows, err := c.Search.Collect(ctx, "node", "*:*")
 		if err != nil {
 			return err
 		}

@@ -159,7 +159,7 @@ func (s *SearchService) Query(ctx context.Context, index, query string, opts ...
 // Breaking out of the loop stops further page requests. A failed page
 // request (including ctx cancellation) is yielded once as a nil row with a
 // non-nil error, after which iteration ends. Options and paging behave as in
-// SearchAll.
+// Collect.
 func (s *SearchService) All(ctx context.Context, index, query string, opts ...SearchOption) iter.Seq2[json.RawMessage, error] {
 	return func(yield func(json.RawMessage, error) bool) {
 		err := s.eachPage(ctx, index, query, opts, func(res *SearchResult, _ int) bool {
@@ -240,13 +240,13 @@ func decodeRows[T any](rows iter.Seq2[json.RawMessage, error], decode func(json.
 	}
 }
 
-// SearchAll pages through every result, returning all rows.
+// Collect pages through every result, returning all rows.
 // WithStart(n) is respected as the absolute offset of the first row to fetch;
 // subsequent pages advance the offset by the number of rows received per page.
 //
-// SearchAll holds the whole result set in memory; use All to process rows
+// Collect holds the whole result set in memory; use All to process rows
 // page by page instead.
-func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts ...SearchOption) ([]json.RawMessage, error) {
+func (s *SearchService) Collect(ctx context.Context, index, query string, opts ...SearchOption) ([]json.RawMessage, error) {
 	var all []json.RawMessage
 	err := s.eachPage(ctx, index, query, opts, func(res *SearchResult, offset int) bool {
 		if all == nil {
@@ -272,7 +272,7 @@ func (s *SearchService) SearchAll(ctx context.Context, index, query string, opts
 	return all, nil
 }
 
-// eachPage is the single paging loop behind All and SearchAll. It requests
+// eachPage is the single paging loop behind All and Collect. It requests
 // successive pages and calls fn with each one and the offset it was
 // requested at; fn returns false to stop without fetching further pages.
 func (s *SearchService) eachPage(ctx context.Context, index, query string, opts []SearchOption, fn func(res *SearchResult, offset int) bool) error {

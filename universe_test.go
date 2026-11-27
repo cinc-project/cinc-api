@@ -38,18 +38,3 @@ func TestUniverse_Get(t *testing.T) {
 		t.Fatalf("Universe = %+v", u)
 	}
 }
-
-func TestUniverse_GetGlobal(t *testing.T) {
-	// The global universe is top-level — must not be org-scoped.
-	srv := cinctest.New(t)
-	srv.Handle("GET /universe", cinctest.Route{Body: universeBody})
-	c := newTestClient(t, srv.Server)
-
-	u, _, err := c.Universe.GetGlobal(context.Background())
-	if err != nil {
-		t.Fatalf("GetGlobal: %v", err)
-	}
-	if u["pssh"]["0.1.0"].LocationPath == "" {
-		t.Fatalf("Universe = %+v", u)
-	}
-}

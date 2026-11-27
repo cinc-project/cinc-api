@@ -75,7 +75,7 @@ func (s *CookbookArtifactsService) Delete(ctx context.Context, name, identifier 
 func (s *CookbookArtifactsService) Upload(ctx context.Context, cb *LocalCookbook, identifier string) error {
 	// Work on a shallow copy so the caller's struct is not mutated.
 	artifact := *cb
-	artifact.Identifier = identifier
+	artifact.identifier = identifier
 	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &artifact, uploadOptions{}); err != nil {
 		return fmt.Errorf("cinc: upload cookbook artifact: %w", err)
 	}

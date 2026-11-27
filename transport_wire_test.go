@@ -57,7 +57,7 @@ func TestServerAPIVersion_IsCanonicalized(t *testing.T) {
 	defer srv.Close()
 	c := newTestClient(t, srv)
 
-	if _, _, err := c.Do(WithServerAPIVersion(context.Background(), "02"), "GET", "/x", nil); err != nil {
+	if _, _, err := c.Do(ContextWithServerAPIVersion(context.Background(), "02"), "GET", "/x", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got != "2" {
@@ -65,7 +65,7 @@ func TestServerAPIVersion_IsCanonicalized(t *testing.T) {
 	}
 	for _, bad := range []string{"abc", "-1", "1.5"} {
 		got = ""
-		_, _, err := c.Do(WithServerAPIVersion(context.Background(), bad), "GET", "/x", nil)
+		_, _, err := c.Do(ContextWithServerAPIVersion(context.Background(), bad), "GET", "/x", nil)
 		if err == nil || !strings.Contains(err.Error(), "server API version") {
 			t.Errorf("version %q: err = %v, want an invalid server API version error", bad, err)
 		}

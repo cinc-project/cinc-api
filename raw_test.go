@@ -66,7 +66,7 @@ func TestClientDo_SignsWithRequestedServerAPIVersion(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	ctx := WithServerAPIVersion(context.Background(), "2")
+	ctx := ContextWithServerAPIVersion(context.Background(), "2")
 	if _, _, err := c.Do(ctx, "GET", "/users", nil); err != nil {
 		t.Fatal(err)
 	}

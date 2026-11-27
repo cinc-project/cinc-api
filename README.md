@@ -37,7 +37,7 @@ following endpoint families are implemented:
 | Service              | Path                                  | Methods                                                              |
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission / Grant / Revoke on an `ACLTarget` (`ObjectACL`, `OrgACL`, `UserACL`); users and clients kept apart (`detail=granular`) |
-| `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
+| `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/AcceptInvite/RejectInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
@@ -54,12 +54,12 @@ following endpoint families are implemented:
 | `c.Principals`       | `/principals/<name>`                  | Get (public key(s) + type for a user/client)                        |
 | `c.RequiredRecipe`   | `/required_recipe`                    | Get (returns Ruby text/plain)                                        |
 | `c.Roles`            | `/roles`                              | List / Get / Create / Update / Delete / Environments / EnvironmentRunList |
-| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`/`WithPartialPaths`), `All` (`iter.Seq2` over rows, one page in memory at a time), `Nodes` (rows decoded as `*Node`), `PartialNodes` (a partial search yielding `*PartialNode`: name plus the projected paths, with `Scalar`/`LastCheckin`), `DataBagItems` (rows unwrapped to `DataBagItem`), `SearchAll`, `Indexes` |
+| `c.Search`           | `/search/INDEX`                       | `Query` (with `WithStart`/`WithRows`/`WithPartial`/`WithPartialPaths`), `All` (`iter.Seq2` over rows, one page in memory at a time), `Nodes` (rows decoded as `*Node`), `PartialNodes` (a partial search yielding `*PartialNode`: name plus the projected paths, with `Scalar`/`LastCheckin`), `DataBagItems` (rows unwrapped to `DataBagItem`), `Collect`, `Indexes` |
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
-| `c.Universe`         | `/universe` (org + top-level)         | Get / GetGlobal (known cookbooks + dependencies)                    |
+| `c.Universe`         | `/universe`                           | Get (known cookbooks + dependencies)                                 |
 | `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / SetPassword / Authenticate   |
-| `c.Do` / `c.Fetch` / `c.Upload` | any path / any URL                    | `Do` sends a signed request to an absolute path and returns the body byte-for-byte (no decode); `WithServerAPIVersion(ctx, v)` picks the API version per request. `Fetch` makes an unsigned GET (e.g. a bookshelf URL) and hands the body to a callback, retrying a truncated body with a fresh reader. `Upload` PUTs a file to a pre-signed sandbox URL (unsigned, Content-MD5, explicit length), reopening the body per attempt |
+| `c.Do` / `c.Fetch` / `c.Upload` | any path / any URL                    | `Do` sends a signed request to an absolute path and returns the body byte-for-byte (no decode); `ContextWithServerAPIVersion(ctx, v)` picks the API version per request. `Fetch` makes an unsigned GET (e.g. a bookshelf URL) and hands the body to a callback, retrying a truncated body with a fresh reader. `Upload` PUTs a file to a pre-signed sandbox URL (unsigned, Content-MD5, explicit length), reopening the body per attempt |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
 `WithChefVersion`, `WithSkipTLSVerify`, `WithRootCAs`, `WithMaxRetries`,

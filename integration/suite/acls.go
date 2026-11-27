@@ -289,7 +289,7 @@ func testSameNamedUserAndClient(t *testing.T, tgt Target, c *cinc.Client) {
 	name := uniqueName(t, "twin")
 	cleanup(t, "user "+name, func(ctx context.Context) error { _, err := c.Users.Delete(ctx, name); return err })
 	res, _, err := c.Users.Create(ctx, &cinc.User{
-		UserName: name, DisplayName: name, Email: name + "@example.com",
+		Username: name, DisplayName: name, Email: name + "@example.com",
 		FirstName: "Test", LastName: "User", Password: userPassword(name), CreateKey: true,
 	})
 	if err != nil {
@@ -298,7 +298,7 @@ func testSameNamedUserAndClient(t *testing.T, tgt Target, c *cinc.Client) {
 	// Membership through an accepted invitation: a direct association needs
 	// the superuser on erchef.
 	id := invite(t, c, name)
-	if _, err := clientAs(t, tgt, name, res.ChefKey.PrivateKey).Associations.RespondInvite(ctx, name, id, true); err != nil {
+	if _, err := clientAs(t, tgt, name, res.ChefKey.PrivateKey).Associations.AcceptInvite(ctx, name, id); err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
 	cleanup(t, "membership "+name, func(ctx context.Context) error { _, _, err := c.Associations.RemoveMember(ctx, name); return err })

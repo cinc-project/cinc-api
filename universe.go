@@ -23,9 +23,3 @@ type UniverseService struct{ client *Client }
 func (s *UniverseService) Get(ctx context.Context) (Universe, *Response, error) {
 	return do[Universe](ctx, s.client, "GET", s.client.orgPath("/universe"), nil)
 }
-
-// GetGlobal returns the top-level universe (/universe), aggregated across the
-// whole server rather than one organization.
-func (s *UniverseService) GetGlobal(ctx context.Context) (Universe, *Response, error) {
-	return do[Universe](ctx, s.client, "GET", "/universe", nil)
-}

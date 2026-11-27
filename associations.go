@@ -108,13 +108,19 @@ func (s *AssociationsService) UserInviteCount(ctx context.Context, username stri
 	return v.Value, resp, err
 }
 
-// RespondInvite accepts (accept=true) or rejects (accept=false) one of the
-// user's pending invitations.
-func (s *AssociationsService) RespondInvite(ctx context.Context, username, id string, accept bool) (*Response, error) {
-	response := "reject"
-	if accept {
-		response = "accept"
-	}
+// AcceptInvite accepts one of the user's pending invitations, making the user
+// a member of the inviting organization.
+func (s *AssociationsService) AcceptInvite(ctx context.Context, username, id string) (*Response, error) {
+	return s.respondInvite(ctx, username, id, "accept")
+}
+
+// RejectInvite declines one of the user's pending invitations.
+func (s *AssociationsService) RejectInvite(ctx context.Context, username, id string) (*Response, error) {
+	return s.respondInvite(ctx, username, id, "reject")
+}
+
+// respondInvite answers an invitation with "accept" or "reject".
+func (s *AssociationsService) respondInvite(ctx context.Context, username, id, response string) (*Response, error) {
 	_, resp, err := do[map[string]any](ctx, s.client, "PUT",
 		"/users/"+esc(username)+"/association_requests/"+esc(id), map[string]string{"response": response})
 	return resp, err
