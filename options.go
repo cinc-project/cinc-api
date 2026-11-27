@@ -99,7 +99,11 @@ func WithRootCAs(pool *x509.CertPool) Option {
 }
 
 // WithMaxRetries sets how many times a failed request is retried: a GET after
-// a 5xx or a network error, any other method after a 503. The default is 2.
+// a 5xx other than 501 and 505, a network error or a client timeout; any
+// other method only after a 503; a bookshelf transfer as a GET, except after
+// a timeout. Waits double from 100ms up to 10s, jittered, or follow a 503's
+// Retry-After (at most 10s). The caller's context ending stops retrying. The
+// default is 2.
 func WithMaxRetries(n int) Option {
 	return func(o *options) {
 		if n >= 0 {

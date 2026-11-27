@@ -134,7 +134,7 @@ func TestSearch_All_CapsPrealloc(t *testing.T) {
 			// Total far exceeds maxPrealloc (100_000); only one row is actually
 			// returned. The next page reports the index's real size, which
 			// ends paging (an empty page alone does not: see
-			// TestSearchAll_PagesPastDeletedObjects).
+			// TestCollect_PagesPastDeletedObjects).
 			w.Write([]byte(`{"total":5000000,"start":0,"rows":[{"name":"a"}]}`))
 			return
 		}
@@ -650,7 +650,7 @@ func TestSearch_DataBagItemsDecodeError(t *testing.T) {
 // counts them. Paging must advance by the page size it asked for, as
 // chef-client's Search::Query does, or a short page repeats rows of the next
 // one and an all-deleted page ends the search early.
-func TestSearchAll_PagesPastDeletedObjects(t *testing.T) {
+func TestCollect_PagesPastDeletedObjects(t *testing.T) {
 	index := []string{"a", "b", "c", "d", "e"}
 	for _, tc := range []struct {
 		name    string

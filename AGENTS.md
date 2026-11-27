@@ -50,7 +50,8 @@ commands and PR conventions).
     `cleanup`, and runs in parallel.
   - `integration/cincserverng` boots one in-memory cinc-server-ng and
     runs the suite against it. A test that cinc-server-ng cannot pass is
-    listed in its `Target.Gaps` with the upstream issue URL, never
+    listed in its `Target.Gaps` with a reason (the upstream issue URL when
+    it is a server bug), never
     deleted or special-cased; `suite.Run` fails on a gap that names no
     test or gives no reason. Remove the gap once the issue is fixed.
   - `integration/cincservererlang` runs the same suite against the CINC
@@ -123,14 +124,21 @@ down.
   `transferClient` is copied before that and keeps the caller's policy, so
   bookshelf/S3 transfers still follow redirects.
 - Retries: GETs are retried on 5xx and on genuine wire failures, up to
-  `WithMaxRetries(n)` (default 2), with exponential backoff from 100ms.
+  `WithMaxRetries(n)` (default 2), with backoff doubling from 100ms up to
+  `maxBackoff` (10s), jittered over its upper half. 501 and 505 are not
+  retried. An `http.Client` timeout on a GET is retried, as chef-client
+  retries one.
   Non-GET requests are retried only on a `503` (`retryable`): the server
   refused them unprocessed (erchef does this when its key-generation pool
   runs dry under parallel user/client creation), while a 500/502/504 or a
   wire failure may follow a request that was applied. A 503's `Retry-After`
   lengthens the wait, capped at `maxRetryAfter`. Every retry goes back
   through `doOnce`, so it resends the same body and is re-signed with a
-  fresh timestamp. Context cancellation/deadline never retries. Only errors wrapped in `transportErr` are retriable — if you add
+  fresh timestamp. The caller's context ending never retries: `backoff`
+  checks `ctx.Err()`, which is how a caller's deadline is told apart from an
+  `http.Client` timeout (both match `context.DeadlineExceeded`); `giveUp`
+  then returns an error matching both `ctx.Err()` and the last failure.
+  Only errors wrapped in `transportErr` are retriable — if you add
   a new failure point in `doOnce` that happens on the wire, mark it, or it
   will never be retried; if it is client-side, do not, or it will be
   retried pointlessly. A `transportErr` that is a failed certificate
@@ -139,7 +147,9 @@ down.
 - Bookshelf transfers (`uploadFile`, `downloadFile`) are the exception to
   "non-GET never retried": they go through `doTransfer`, which applies
   the same `shouldRetry`/`backoff` policy to the pre-signed PUT as well,
-  because it is idempotent (content-addressed by checksum). They use
+  because it is idempotent (content-addressed by checksum), except that a
+  transfer timeout is not retried (a file too big for the limit would only
+  time out again). They use
   `transferClient` (timeout `WithTransferTimeout`, default 10m), not
   the API client's 30s timeout.
 

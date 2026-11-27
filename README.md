@@ -27,7 +27,10 @@ standard library.
     node, _, err := c.Nodes.Get(ctx, "web01")
     if errors.Is(err, cinc.ErrNotFound) {
         // no such node
+    } else if err != nil {
+        return err
     }
+    fmt.Println(node.Environment)
 
 ## Status
 

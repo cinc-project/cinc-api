@@ -69,8 +69,14 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	// from the server root, so a path here (most often a pasted
 	// .../organizations/<org> URL) would be prefixed onto every request.
 	if base.Path != "" || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
-		return nil, fmt.Errorf("cinc: ServerURL %q must be scheme://host[:port] with no path, query or fragment; "+
-			"use ParseServerURL to split an https://host/organizations/<org> URL into ServerURL and Org", cfg.ServerURL)
+		if strings.HasPrefix(base.Path, "/organizations/") {
+			return nil, fmt.Errorf("cinc: ServerURL %q includes the organization; "+
+				"use ParseServerURL to split an https://host/organizations/<org> URL into ServerURL and Org", cfg.ServerURL)
+		}
+		// A request is signed over the path the server sees; a proxy that
+		// strips a prefix would make every signature cover the wrong path.
+		return nil, fmt.Errorf("cinc: ServerURL %q must be scheme://host[:port], with no path, query or fragment "+
+			"(a server behind a path prefix is not supported)", cfg.ServerURL)
 	}
 	o := defaultOptions()
 	for _, opt := range opts {

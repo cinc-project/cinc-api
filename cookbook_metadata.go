@@ -21,7 +21,7 @@ import (
 // package never does. ParseMetadataRb returns it, wrapped with the line,
 // alongside the rest of the metadata, whose Version is left empty; without
 // the check the cookbook would silently take Chef's default of 0.0.0.
-var ErrMetadataVersionNotLiteral = errors.New("version is not a string literal, so it can't be read without running Ruby")
+var ErrMetadataVersionNotLiteral = errors.New("cinc: version is not a string literal, so it can't be read without running Ruby")
 
 // LoadCookbookMetadata reads the cookbook metadata in dir. Like Chef's
 // CookbookVersionLoader, metadata.json takes precedence over metadata.rb; see
@@ -111,7 +111,7 @@ var metadataRbAssignment = regexp.MustCompile(`^[ \t]*[a-z_]+[ \t]*=[^=~]`)
 // double-quoted without interpolation or escapes other than \" and \\; a
 // symbol (:apt, :"apt") reads as its name; a # comment may end any line.
 // A call may continue onto following lines after a trailing comma or an open
-// parenthesis or bracket, as Ruby reads it (see metadataRbStatements).
+// parenthesis or bracket, as Ruby reads it.
 //
 // A statement whose arguments are not all literals (a computed value,
 // interpolation, a trailing conditional) is skipped, as is any other method,

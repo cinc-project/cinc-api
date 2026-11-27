@@ -299,8 +299,8 @@ func (s *CookbooksService) Download(ctx context.Context, name, version, destDir 
 // DownloadFiles writes every file of an already-fetched cookbook manifest (a
 // Cookbooks.Get or CookbookArtifacts.Get result) to destDir, recreating the
 // path hierarchy. File content is fetched from the manifest's pre-signed
-// bookshelf URLs using a plain (unsigned) HTTP GET, matching the upload path
-// in sandboxes.go; no API request is made. Each file is verified against the
+// bookshelf URLs using a plain (unsigned) HTTP GET, as uploads are sent; no
+// API request is made. Each file is verified against the
 // manifest's MD5 checksum and written atomically; files already in destDir
 // with a matching checksum are skipped.
 //
@@ -615,8 +615,8 @@ func SkipChefignore() LocalCookbookOption {
 //   - files excluded by the applicable chefignore (see LoadChefignore, which
 //     also searches parent directories) are skipped;
 //   - a symlink to a regular file inside the cookbook is kept under its own
-//     path; any other symlink, and any special file, is skipped (see
-//     cookbookSymlinkTarget).
+//     path; any other symlink (to a directory, to anything outside the
+//     cookbook, or to nothing), and any special file, is skipped.
 //
 // Metadata comes from LoadCookbookMetadata: metadata.json when present
 // (complete, as compiled by knife or Berkshelf), and otherwise a static parse

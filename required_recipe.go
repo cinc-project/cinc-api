@@ -4,7 +4,7 @@ import "context"
 
 // RequiredRecipeService accesses the /required_recipe endpoint. Unlike the
 // rest of the API this endpoint returns a Ruby recipe as text/plain rather
-// than JSON, so it bypasses the generic do[T] helper.
+// than JSON.
 type RequiredRecipeService struct{ client *Client }
 
 // Get returns the configured required recipe (Ruby text). The endpoint
