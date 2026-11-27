@@ -2,8 +2,10 @@ package cinc
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -84,5 +86,27 @@ func TestStats_Unauthorized(t *testing.T) {
 
 	if _, _, err := c.Stats.Get(context.Background(), "statsuser", "wrong"); err == nil {
 		t.Fatal("expected 401")
+	}
+}
+
+// A histogram carries sample_sum, sample_count and buckets instead of a value
+// (chef_wm_prometheus_json_format:emit_metric), all as strings.
+func TestStats_Histogram(t *testing.T) {
+	var stats []Stat
+	body := `[{"name":"chef_index_batch_queue_latency","type":"HISTOGRAM","help":"h","metrics":[
+		{"labels":{"stage":"flush"},"sample_sum":"12.5","sample_count":"3",
+		 "bucket":[{"cumulative_count":"1","upper_bound":"0.5"},{"cumulative_count":"3","upper_bound":"+Inf"}]}]}]`
+	if err := json.Unmarshal([]byte(body), &stats); err != nil {
+		t.Fatal(err)
+	}
+	m := stats[0].Metrics[0]
+	want := StatMetric{
+		Labels:      map[string]string{"stage": "flush"},
+		SampleSum:   "12.5",
+		SampleCount: "3",
+		Buckets:     []StatBucket{{CumulativeCount: "1", UpperBound: "0.5"}, {CumulativeCount: "3", UpperBound: "+Inf"}},
+	}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("metric = %+v\nwant     %+v", m, want)
 	}
 }
