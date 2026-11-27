@@ -138,6 +138,8 @@ model, so callers don't re-encode server conventions:
 - `Clients.Update(name, cl)` and `Users.Update(name, u)` — the path is the
   current name and the body the new values, so setting a different
   `Name`/`Username` renames the client or user (the server answers 201).
+  Chef Server keeps no keys across a client rename; `Reregister` gives the
+  renamed client a new `default` key.
 - `Clients.Reregister(name)` — regenerate a client's `default` key in place
   (one `PUT .../keys/default` with `create_key`) and return the new pair,
   keeping the key's expiration; a client with no default key gets one

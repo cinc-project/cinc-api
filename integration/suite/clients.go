@@ -51,8 +51,7 @@ func testClientRename(t *testing.T, tgt Target, c *cinc.Client) {
 			return err
 		})
 	}
-	created, _, err := c.Clients.Create(ctx, &cinc.APIClient{Name: oldName})
-	if err != nil {
+	if _, _, err := c.Clients.Create(ctx, &cinc.APIClient{Name: oldName}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -69,9 +68,17 @@ func testClientRename(t *testing.T, tgt Target, c *cinc.Client) {
 	if got, _, err := c.Clients.Get(ctx, newName); err != nil || got.Name != newName {
 		t.Fatalf("Get new name after rename: %+v %v", got, err)
 	}
-	as := clientAs(t, tgt, newName, created.ChefKey.PrivateKey)
+	// erchef keeps no keys across a client rename (observed on CINC Server
+	// 15.10.125: the renamed client lists no keys and neither name
+	// authenticates), so Reregister, which creates a missing default key,
+	// is how a renamed client gets a working one.
+	key, _, err := c.Clients.Reregister(ctx, newName)
+	if err != nil {
+		t.Fatalf("Reregister after rename: %v", err)
+	}
+	as := clientAs(t, tgt, newName, key.PrivateKey)
 	if _, _, err := as.Nodes.List(ctx); err != nil {
-		t.Fatalf("list nodes as the renamed client with its original key: %v", err)
+		t.Fatalf("list nodes as the renamed client with its new key: %v", err)
 	}
 }
 

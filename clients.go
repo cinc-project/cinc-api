@@ -76,6 +76,10 @@ func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*ClientCrea
 // name: the server then answers 201 with the new location. An empty cl.Name
 // keeps the current one. Key fields on cl are not sent; manage keys with
 // Keys.Client(name).
+//
+// Chef Server keeps no keys across a client rename: the renamed client has
+// none and cannot authenticate until it gets one, for example from
+// Reregister, which creates a default key for a client that has none.
 func (s *ClientsService) Update(ctx context.Context, name string, cl *APIClient) (*APIClient, *Response, error) {
 	if name == "" {
 		return nil, nil, errors.New("cinc: Clients.Update needs the client's current name")
