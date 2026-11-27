@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,11 +132,13 @@ func TestSearch_All_CapsPrealloc(t *testing.T) {
 		if page == 0 {
 			page++
 			// Total far exceeds maxPrealloc (100_000); only one row is actually
-			// returned, and the next page is empty to terminate paging.
+			// returned. The next page reports the index's real size, which
+			// ends paging (an empty page alone does not: see
+			// TestSearchAll_PagesPastDeletedObjects).
 			w.Write([]byte(`{"total":5000000,"start":0,"rows":[{"name":"a"}]}`))
 			return
 		}
-		w.Write([]byte(`{"total":5000000,"start":1,"rows":[]}`))
+		w.Write([]byte(`{"total":1,"start":1000,"rows":[]}`))
 	})
 	c := newTestClient(t, srv.Server)
 	rows, err := c.Search.SearchAll(context.Background(), "node", "*:*")
@@ -637,5 +642,55 @@ func TestSearch_DataBagItemsDecodeError(t *testing.T) {
 		if item != nil || err == nil || !strings.Contains(err.Error(), "users") {
 			t.Errorf("got (%v, %v), want a decode error naming the bag", item, err)
 		}
+	}
+}
+
+// erchef pages through the search index, then loads the objects; any already
+// deleted from the database are dropped from the page while "total" still
+// counts them. Paging must advance by the page size it asked for, as
+// chef-client's Search::Query does, or a short page repeats rows of the next
+// one and an all-deleted page ends the search early.
+func TestSearchAll_PagesPastDeletedObjects(t *testing.T) {
+	index := []string{"a", "b", "c", "d", "e"}
+	for _, tc := range []struct {
+		name    string
+		deleted []string
+		want    string
+	}{
+		{"short page", []string{"b"}, "a,c,d,e"},
+		{"empty page", []string{"c", "d"}, "a,b,e"},
+		{"nothing deleted", nil, "a,b,c,d,e"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+				rows, _ := strconv.Atoi(r.URL.Query().Get("rows"))
+				var page []string
+				for _, id := range index[min(start, len(index)):min(start+rows, len(index))] {
+					if !slices.Contains(tc.deleted, id) {
+						page = append(page, fmt.Sprintf(`{"name":%q}`, id))
+					}
+				}
+				fmt.Fprintf(w, `{"total":%d,"start":%d,"rows":[%s]}`, len(index), start, strings.Join(page, ","))
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv)
+
+			rows, err := c.Search.SearchAll(context.Background(), "node", "*:*", WithRows(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, row := range rows {
+				var n struct{ Name string }
+				if err := json.Unmarshal(row, &n); err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, n.Name)
+			}
+			if strings.Join(got, ",") != tc.want {
+				t.Errorf("All = %v, want %s", got, tc.want)
+			}
+		})
 	}
 }

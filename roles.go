@@ -15,12 +15,20 @@ type Role struct {
 	EnvRunLists        map[string][]string `json:"env_run_lists,omitempty"`
 }
 
-// MarshalJSON encodes the role with run_list always present as an array, for
-// the same reason as Node.MarshalJSON.
+// MarshalJSON encodes the role with run_list, and each env_run_lists value,
+// always present as an array, for the same reason as Node.MarshalJSON: the
+// server validates them as arrays and rejects null.
 func (r Role) MarshalJSON() ([]byte, error) {
 	type alias Role
 	a := alias(r)
 	a.RunList = nonNil(a.RunList)
+	if a.EnvRunLists != nil {
+		envs := make(map[string][]string, len(a.EnvRunLists))
+		for env, rl := range a.EnvRunLists {
+			envs[env] = nonNil(rl)
+		}
+		a.EnvRunLists = envs
+	}
 	return json.Marshal(a)
 }
 

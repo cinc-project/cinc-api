@@ -84,3 +84,19 @@ func TestRole_NilRunListEncodesAsEmptyArray(t *testing.T) {
 		t.Errorf("encoded %s, want run_list to be []", b)
 	}
 }
+
+// erchef validates each env_run_lists value as a run list array, so a nil
+// slice must go out as [] rather than null, without touching the caller's map.
+func TestRole_MarshalJSON_EnvRunListsNeverNull(t *testing.T) {
+	r := Role{Name: "web", EnvRunLists: map[string][]string{"prod": nil, "dev": {"recipe[a]"}}}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"env_run_lists":{"dev":["recipe[a]"],"prod":[]}`) {
+		t.Errorf("marshaled %s, want prod as []", b)
+	}
+	if r.EnvRunLists["prod"] != nil {
+		t.Error("MarshalJSON modified the caller's EnvRunLists")
+	}
+}
