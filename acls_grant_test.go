@@ -12,14 +12,15 @@ import (
 	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
-// aclBody is a full ACL in which every permission grants only the admins
-// group, so any member a test adds or removes is a visible change.
+// aclBody is a full ACL, in the granular form Get asks for, in which every
+// permission grants only the admins group and read also grants user alice, so
+// any member a test adds or removes is a visible change.
 const aclBody = `{
-	"create":{"actors":[],"groups":["admins"]},
-	"read":{"actors":["alice"],"groups":["admins"]},
-	"update":{"actors":[],"groups":["admins"]},
-	"delete":{"actors":[],"groups":["admins"]},
-	"grant":{"actors":[],"groups":["admins"]}
+	"create":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"read":{"actors":[],"users":["alice"],"clients":[],"groups":["admins"]},
+	"update":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"delete":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"grant":{"actors":[],"users":[],"clients":[],"groups":["admins"]}
 }`
 
 func TestACLTarget_Paths(t *testing.T) {
@@ -39,15 +40,15 @@ func TestACLTarget_Paths(t *testing.T) {
 			srv.Handle("PUT "+tc.put, cinctest.Route{Body: `{}`})
 			c := newTestClient(t, srv.Server)
 			ctx := context.Background()
-			acl, _, err := c.ACLs.GetTarget(ctx, tc.target)
+			acl, _, err := c.ACLs.Get(ctx, tc.target)
 			if err != nil {
-				t.Fatalf("GetTarget: %v", err)
+				t.Fatalf("Get: %v", err)
 			}
-			if !reflect.DeepEqual(acl.Read.Actors, []string{"alice"}) {
-				t.Errorf("read.actors = %v", acl.Read.Actors)
+			if !reflect.DeepEqual(acl.Read.Users, []string{"alice"}) {
+				t.Errorf("read.users = %v", acl.Read.Users)
 			}
-			if err := c.ACLs.SetTargetPermission(ctx, tc.target, "read", &acl.Read); err != nil {
-				t.Fatalf("SetTargetPermission: %v", err)
+			if _, err := c.ACLs.SetPermission(ctx, tc.target, "read", &acl.Read); err != nil {
+				t.Fatalf("SetPermission: %v", err)
 			}
 		})
 	}
@@ -90,13 +91,13 @@ func TestACLTarget_RejectsIncompleteTargets(t *testing.T) {
 			srv := cinctest.New(t) // no routes: any request fails the test
 			c := newTestClient(t, srv.Server)
 			ctx := context.Background()
-			if _, _, err := c.ACLs.GetTarget(ctx, target); err == nil {
-				t.Error("GetTarget returned nil error")
+			if _, _, err := c.ACLs.Get(ctx, target); err == nil {
+				t.Error("Get returned nil error")
 			}
-			if err := c.ACLs.SetTargetPermission(ctx, target, "read", &ACE{}); err == nil {
-				t.Error("SetTargetPermission returned nil error")
+			if _, err := c.ACLs.SetPermission(ctx, target, "read", &ACE{}); err == nil {
+				t.Error("SetPermission returned nil error")
 			}
-			if _, err := c.ACLs.Grant(ctx, target, "read", []string{"bob"}, nil); err == nil {
+			if _, err := c.ACLs.Grant(ctx, target, "read", ACLMembers{Users: []string{"bob"}}); err == nil {
 				t.Error("Grant returned nil error")
 			}
 		})
@@ -108,8 +109,14 @@ func TestACLObjectTypes(t *testing.T) {
 		"clients", "containers", "cookbooks", "cookbook_artifacts", "data",
 		"environments", "groups", "nodes", "policies", "policy_groups", "roles",
 	}
-	if !reflect.DeepEqual(ACLObjectTypes, want) {
-		t.Errorf("ACLObjectTypes = %v, want %v", ACLObjectTypes, want)
+	got := ACLObjectTypes()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ACLObjectTypes() = %v, want %v", got, want)
+	}
+	// It is a fresh copy every time.
+	got[0] = "x"
+	if again := ACLObjectTypes(); !reflect.DeepEqual(again, want) {
+		t.Errorf("after editing a copy, ACLObjectTypes() = %v", again)
 	}
 }
 
@@ -139,14 +146,15 @@ func TestACLs_GrantOne(t *testing.T) {
 	puts := putRecorder(srv, base, "update")
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "update", []string{"bob"}, []string{"ops"})
+	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "update",
+		ACLMembers{Users: []string{"bob"}, Groups: []string{"ops"}})
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if !reflect.DeepEqual(changed, []string{"update"}) {
 		t.Errorf("changed = %v", changed)
 	}
-	want := ACE{Actors: []string{"bob"}, Groups: []string{"admins", "ops"}}
+	want := ACE{Actors: []string{}, Users: []string{"bob"}, Clients: []string{}, Groups: []string{"admins", "ops"}}
 	if !reflect.DeepEqual(puts["update"], want) {
 		t.Errorf("PUT update = %+v, want %+v", puts["update"], want)
 	}
@@ -165,7 +173,7 @@ func TestACLs_GrantAllSkipsUnchanged(t *testing.T) {
 	puts := putRecorder(srv, base, "create", "update", "delete", "grant")
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "all", []string{"alice"}, nil)
+	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "all", ACLMembers{Users: []string{"alice"}})
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
@@ -186,7 +194,8 @@ func TestACLs_GrantNoChange(t *testing.T) {
 	srv.Handle("GET /organizations/o/nodes/web01/_acl", cinctest.Route{Body: aclBody})
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "read", []string{"alice"}, []string{"admins"})
+	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "read",
+		ACLMembers{Users: []string{"alice"}, Groups: []string{"admins"}})
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
@@ -202,13 +211,14 @@ func TestACLs_Revoke(t *testing.T) {
 	c := newTestClient(t, srv.Server)
 
 	// alice is only on read; the other four are left alone.
-	changed, err := c.ACLs.Revoke(context.Background(), OrgACL(), "all", []string{"alice"}, nil)
+	changed, err := c.ACLs.Revoke(context.Background(), OrgACL(), "all", ACLMembers{Users: []string{"alice"}})
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if !reflect.DeepEqual(changed, []string{"read"}) {
 		t.Errorf("changed = %v", changed)
 	}
+	// The last user is gone, so the ACE goes back in the flat form.
 	want := ACE{Actors: []string{}, Groups: []string{"admins"}}
 	if !reflect.DeepEqual(puts["read"], want) {
 		t.Errorf("PUT read = %+v, want %+v", puts["read"], want)
@@ -229,7 +239,7 @@ func TestACLs_GrantPartialFailure(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Grant(context.Background(), UserACL("alice"), "all", []string{"ghost"}, nil)
+	changed, err := c.ACLs.Grant(context.Background(), UserACL("alice"), "all", ACLMembers{Users: []string{"ghost"}})
 	if !reflect.DeepEqual(changed, []string{"create"}) {
 		t.Errorf("changed = %v, want [create]", changed)
 	}
@@ -261,7 +271,7 @@ func TestACLs_RevokeFirstWriteFails(t *testing.T) {
 	})
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), "grant", nil, []string{"admins"})
+	changed, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), "grant", ACLMembers{Groups: []string{"admins"}})
 	if changed != nil {
 		t.Errorf("changed = %v, want nil", changed)
 	}
@@ -283,7 +293,7 @@ func TestACLs_GrantReadFails(t *testing.T) {
 	srv.Handle("GET /organizations/o/nodes/missing/_acl", cinctest.Route{Status: 404, Body: `{"error":["not found"]}`})
 	c := newTestClient(t, srv.Server)
 
-	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "missing"), "read", []string{"bob"}, nil)
+	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "missing"), "read", ACLMembers{Users: []string{"bob"}})
 	if changed != nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Grant = %v, %v; want nil, ErrNotFound", changed, err)
 	}
@@ -299,13 +309,13 @@ func TestACLs_GrantRevokeValidateFirst(t *testing.T) {
 	ctx := context.Background()
 	target := ObjectACL(ACLNodes, "web01")
 
-	if _, err := c.ACLs.Grant(ctx, target, "bogus", []string{"bob"}, nil); err == nil {
+	if _, err := c.ACLs.Grant(ctx, target, "bogus", ACLMembers{Users: []string{"bob"}}); err == nil {
 		t.Error("Grant(bogus perm) returned nil error")
 	}
-	if _, err := c.ACLs.Revoke(ctx, target, "read", nil, nil); err == nil || !strings.Contains(err.Error(), "at least one") {
+	if _, err := c.ACLs.Revoke(ctx, target, "read", ACLMembers{}); err == nil || !strings.Contains(err.Error(), "at least one") {
 		t.Errorf("Revoke(no members) = %v, want an at-least-one-member error", err)
 	}
-	if _, err := c.ACLs.Grant(ctx, target, "read", []string{}, []string{}); err == nil {
+	if _, err := c.ACLs.Grant(ctx, target, "read", ACLMembers{Users: []string{}, Clients: []string{}, Groups: []string{}}); err == nil {
 		t.Error("Grant(empty members) returned nil error")
 	}
 }
@@ -317,7 +327,7 @@ func refusingServer(t *testing.T, acl, failPerm string, status int) *Client {
 	const base = "/organizations/o/nodes/web01"
 	srv := cinctest.New(t)
 	srv.Handle("GET "+base+"/_acl", cinctest.Route{Body: acl})
-	for _, p := range ACLPerms {
+	for _, p := range ACLPerms() {
 		r := cinctest.Route{Body: `{}`}
 		if p == failPerm {
 			r = cinctest.Route{Status: status, Body: `{"error":["refused"]}`}
@@ -333,7 +343,7 @@ func refusingServer(t *testing.T, acl, failPerm string, status int) *Client {
 func TestACLs_RevokeAdminsFromGrantIsAdminsRequiredOnGrant(t *testing.T) {
 	for _, perm := range []string{"grant", "all"} {
 		c := refusingServer(t, aclBody, "grant", 403)
-		_, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), perm, nil, []string{"admins"})
+		_, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), perm, ACLMembers{Groups: []string{"admins"}})
 		if !errors.Is(err, ErrAdminsRequiredOnGrant) {
 			t.Errorf("Revoke(%s): errors.Is(err, ErrAdminsRequiredOnGrant) = false: %v", perm, err)
 		}
@@ -358,29 +368,29 @@ func TestACLs_OtherFailuresAreNotAdminsRequiredOnGrant(t *testing.T) {
 	"read":{"actors":[],"groups":["admins"]},
 	"update":{"actors":[],"groups":["admins"]},
 	"delete":{"actors":[],"groups":["admins"]},
-	"grant":{"actors":["bob"],"groups":["admins","devs"]}
+	"grant":{"actors":[],"users":[],"clients":["bob"],"groups":["admins","devs"]}
 }`
 	ctx := context.Background()
 	target := ObjectACL(ACLNodes, "web01")
 	for _, tc := range []struct {
-		name           string
-		failPerm       string
-		status         int
-		revoke         bool
-		actors, groups []string
+		name     string
+		failPerm string
+		status   int
+		revoke   bool
+		members  ACLMembers
 	}{
-		{"revoke admins from grant, 400", "grant", 400, true, nil, []string{"admins"}},
-		{"revoke admins from read, 403", "read", 403, true, nil, []string{"admins"}},
-		{"revoke devs from grant, 403", "grant", 403, true, nil, []string{"devs"}},
-		{"revoke bob from grant, 403", "grant", 403, true, []string{"bob"}, nil},
-		{"grant carol on grant, 403", "grant", 403, false, []string{"carol"}, nil},
+		{"revoke admins from grant, 400", "grant", 400, true, ACLMembers{Groups: []string{"admins"}}},
+		{"revoke admins from read, 403", "read", 403, true, ACLMembers{Groups: []string{"admins"}}},
+		{"revoke devs from grant, 403", "grant", 403, true, ACLMembers{Groups: []string{"devs"}}},
+		{"revoke bob from grant, 403", "grant", 403, true, ACLMembers{Clients: []string{"bob"}}},
+		{"grant carol on grant, 403", "grant", 403, false, ACLMembers{Users: []string{"carol"}}},
 	} {
 		c := refusingServer(t, withDevs, tc.failPerm, tc.status)
 		var err error
 		if tc.revoke {
-			_, err = c.ACLs.Revoke(ctx, target, tc.failPerm, tc.actors, tc.groups)
+			_, err = c.ACLs.Revoke(ctx, target, tc.failPerm, tc.members)
 		} else {
-			_, err = c.ACLs.Grant(ctx, target, tc.failPerm, tc.actors, tc.groups)
+			_, err = c.ACLs.Grant(ctx, target, tc.failPerm, tc.members)
 		}
 		if err == nil {
 			t.Errorf("%s: no error; the case sent nothing", tc.name)
@@ -389,5 +399,83 @@ func TestACLs_OtherFailuresAreNotAdminsRequiredOnGrant(t *testing.T) {
 		if errors.Is(err, ErrAdminsRequiredOnGrant) {
 			t.Errorf("%s: wrongly reported as ErrAdminsRequiredOnGrant: %v", tc.name, err)
 		}
+	}
+}
+
+// sharedNameACL holds a user and a client both named jenkins on read, as
+// erchef reports them with detail=granular.
+const sharedNameACL = `{
+	"create":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"read":{"actors":[],"users":["jenkins"],"clients":["jenkins"],"groups":["admins"]},
+	"update":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"delete":{"actors":[],"users":[],"clients":[],"groups":["admins"]},
+	"grant":{"actors":[],"users":[],"clients":[],"groups":["admins"]}
+}`
+
+// A user and a client that share a name and both hold read used to make every
+// later write resend "actors":["jenkins","jenkins"], which erchef refuses for
+// good with a 422 ambiguous_actor (oc_chef_authz_acl:fetch_actors). Writes now
+// keep them apart in "users" and "clients".
+func TestACLs_GrantKeepsSameNamedUserAndClientApart(t *testing.T) {
+	const base = "/organizations/o/nodes/web01"
+	srv := cinctest.New(t)
+	srv.Handle("GET "+base+"/_acl", cinctest.Route{Body: sharedNameACL})
+	puts := putRecorder(srv, base, "read")
+	c := newTestClient(t, srv.Server)
+
+	if _, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "read",
+		ACLMembers{Groups: []string{"ops"}}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	want := ACE{Actors: []string{}, Users: []string{"jenkins"}, Clients: []string{"jenkins"}, Groups: []string{"admins", "ops"}}
+	if !reflect.DeepEqual(puts["read"], want) {
+		t.Errorf("PUT read = %+v, want %+v", puts["read"], want)
+	}
+}
+
+// Revoking the client leaves the user of the same name granted.
+func TestACLs_RevokeClientKeepsSameNamedUser(t *testing.T) {
+	const base = "/organizations/o/nodes/web01"
+	srv := cinctest.New(t)
+	srv.Handle("GET "+base+"/_acl", cinctest.Route{Body: sharedNameACL})
+	puts := putRecorder(srv, base, "read")
+	c := newTestClient(t, srv.Server)
+
+	changed, err := c.ACLs.Revoke(context.Background(), ObjectACL(ACLNodes, "web01"), "all",
+		ACLMembers{Clients: []string{"jenkins"}})
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if !reflect.DeepEqual(changed, []string{"read"}) {
+		t.Errorf("changed = %v, want [read]", changed)
+	}
+	want := ACE{Actors: []string{}, Users: []string{"jenkins"}, Clients: []string{}, Groups: []string{"admins"}}
+	if !reflect.DeepEqual(puts["read"], want) {
+		t.Errorf("PUT read = %+v, want %+v", puts["read"], want)
+	}
+}
+
+// A server that ignores detail=granular reports untyped actors, which Grant
+// and Revoke cannot sort into users and clients. They refuse before writing
+// anything rather than send a mixed ACE or miss a member.
+func TestACLs_GrantRefusesUntypedActors(t *testing.T) {
+	const flat = `{
+	"create":{"actors":[],"groups":["admins"]},
+	"read":{"actors":["alice"],"groups":["admins"]},
+	"update":{"actors":[],"groups":["admins"]},
+	"delete":{"actors":[],"groups":["admins"]},
+	"grant":{"actors":[],"groups":["admins"]}
+}`
+	srv := cinctest.New(t) // only the GET: any write fails the test
+	srv.Handle("GET /organizations/o/nodes/web01/_acl", cinctest.Route{Body: flat})
+	c := newTestClient(t, srv.Server)
+
+	changed, err := c.ACLs.Grant(context.Background(), ObjectACL(ACLNodes, "web01"), "all",
+		ACLMembers{Groups: []string{"ops"}})
+	if changed != nil || err == nil || !strings.Contains(err.Error(), "detail=granular") {
+		t.Fatalf("Grant = %v, %v; want nil and an error naming detail=granular", changed, err)
+	}
+	if !strings.Contains(err.Error(), "read on nodes/web01") {
+		t.Errorf("err = %v, want it to name the permission and target", err)
 	}
 }

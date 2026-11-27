@@ -24,7 +24,7 @@ following endpoint families are implemented:
 
 | Service              | Path                                  | Methods                                                              |
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
-| `c.ACLs`             | `/<object>/<name>/_acl`               | GetTarget / SetTargetPermission / Grant / Revoke on an `ACLTarget` (`ObjectACL`, `OrgACL`, `UserACL`); Get / SetPermission, GetOrg / SetOrgPermission and GetUser / SetUserPermission |
+| `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission / Grant / Revoke on an `ACLTarget` (`ObjectACL`, `OrgACL`, `UserACL`); users and clients kept apart (`detail=granular`) |
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
@@ -247,16 +247,23 @@ model, so callers don't re-encode server conventions:
   (SHA-1 of the sorted `path:md5` lines), so a lock always names the files an
   upload sends.
 - `ACL`/`ACE` merge helpers — `ACL.ACEFor(perm)` selects the ACE for one
-  permission, `ACE.AddMembers`/`RemoveMembers` dedupe-add or remove actors and
-  groups (reporting whether anything changed), and `ExpandPerm("all")` expands
-  to the five standard permissions — the reusable core of an ACL grant/revoke.
+  permission, `ACE.AddMembers`/`RemoveMembers(cinc.ACLMembers{...})`
+  dedupe-add or remove users, clients and groups (reporting whether anything
+  changed), and `ExpandPerm("all")` expands to the five standard permissions
+  listed by `ACLPerms()` — the reusable core of an ACL grant/revoke.
+- Users and clients in ACLs — `ACLs.Get` reads with `?detail=granular`, so an
+  `ACE` lists `Users` and `Clients` apart (`Actors` stays empty), and
+  `SetPermission` writes them back that way, with `"actors": []` as erchef
+  requires. A user and a client that share a name are two members: erchef
+  refuses a flat `actors` list naming such a pair with a 422. `Actors` is the
+  flat form, for a server that does not split them.
 - ACL targets and grant/revoke — `ObjectACL(cinc.ACLNodes, "web01")`,
   `OrgACL()` and `UserACL("alice")` name the object whose ACL is read or
   written; the `ACL*` constants (`ACLDataBags` is `"data"`, and so on, listed
-  in `ACLObjectTypes`) are the object types erchef serves `_acl` on.
-  `ACLs.Grant`/`Revoke(ctx, target, perm, actors, groups)` take a permission
-  or `"all"`, read the ACL once, write only the permissions that change, and
-  return those; a write that fails part way returns the permissions already
+  by `ACLObjectTypes()`) are the object types erchef serves `_acl` on.
+  `ACLs.Grant`/`Revoke(ctx, target, perm, cinc.ACLMembers{Users, Clients,
+  Groups})` take a permission or `"all"`, read the ACL once, write only the
+  permissions that change, and return those; a write that fails part way returns the permissions already
   changed and an `*ACLChangeError` naming the one that failed. A member the
   server cannot resolve is a 400, `ErrBadRequest`. erchef's refusal to take
   the admins group off `grant` (only the superuser may) matches

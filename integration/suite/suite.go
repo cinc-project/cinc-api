@@ -91,6 +91,7 @@ var cases = []testCase{
 	{"acls/grant-revoke", testGrantRevoke},
 	{"acls/grant-rejects-unknown-members", testGrantRejectsUnknownMembers},
 	{"acls/revoke-keeps-admins-on-grant", testRevokeKeepsAdminsOnGrant},
+	{"acls/same-named-user-and-client", testSameNamedUserAndClient},
 	{"search/partial", testSearchPartial},
 	{"search/all-pages", testSearchAllPages},
 	{"search/partial-paths-unwrap", testSearchPartialPathsUnwrap},

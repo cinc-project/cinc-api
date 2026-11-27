@@ -12,66 +12,156 @@ import (
 	"github.com/cinc-project/cinc-api/internal/cinctest"
 )
 
+// granularACL is web01's ACL as erchef answers GET .../_acl?detail=granular:
+// every ACE carries "actors": [] and the names split into "users" and
+// "clients" (oc_chef_authz_acl:part_with_actors).
+const granularACL = `{
+	"create":{"actors":[],"users":["pivotal"],"clients":[],"groups":["admins"]},
+	"read":{"actors":[],"users":[],"clients":["web01"],"groups":["admins","users","clients"]},
+	"update":{"actors":[],"users":["pivotal"],"clients":[],"groups":["admins"]},
+	"delete":{"actors":[],"users":["pivotal"],"clients":[],"groups":["admins"]},
+	"grant":{"actors":[],"users":["pivotal"],"clients":[],"groups":["admins"]}
+}`
+
+// Get always asks for the granular form, so a user and a client that share a
+// name stay distinguishable (oc_chef_wm_acl:to_json reads detail=granular).
 func TestACLs_Get(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("GET /organizations/o/nodes/web01/_acl", cinctest.Route{
-		Body: `{
-			"create":{"actors":["pivotal"],"groups":["admins"]},
-			"read":{"actors":[],"groups":["admins","users","clients"]},
-			"update":{"actors":["pivotal"],"groups":["admins"]},
-			"delete":{"actors":["pivotal"],"groups":["admins"]},
-			"grant":{"actors":["pivotal"],"groups":["admins"]}
-		}`,
-	})
-	c := newTestClient(t, srv.Server)
-
-	acl, _, err := c.ACLs.Get(context.Background(), "nodes", "web01")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !reflect.DeepEqual(acl.Create.Actors, []string{"pivotal"}) {
-		t.Errorf("create.actors = %v", acl.Create.Actors)
-	}
-	if !reflect.DeepEqual(acl.Read.Groups, []string{"admins", "users", "clients"}) {
-		t.Errorf("read.groups = %v", acl.Read.Groups)
-	}
-}
-
-func TestACLs_SetPermission(t *testing.T) {
-	// PUT a single permission. Body shape: {"<perm>": {"actors": [...], "groups": [...]}}.
-	srv := cinctest.New(t)
-	srv.Handle("PUT /organizations/o/nodes/web01/_acl/update", cinctest.Route{
-		Body: `{}`,
-		Assert: func(t *testing.T, _ *http.Request, body []byte) {
-			var req map[string]ACE
-			if err := json.Unmarshal(body, &req); err != nil {
-				t.Fatalf("decode: %v (body=%s)", err, body)
-			}
-			ace, ok := req["update"]
-			if !ok {
-				t.Fatalf("PUT body missing perm key: %s", body)
-			}
-			if !reflect.DeepEqual(ace.Groups, []string{"admins", "ops"}) {
-				t.Errorf("groups = %v", ace.Groups)
-			}
-			// Empty actors must serialize as [] not null.
-			var raw struct {
-				Update struct {
-					Actors json.RawMessage `json:"actors"`
-				} `json:"update"`
-			}
-			json.Unmarshal(body, &raw)
-			if string(raw.Update.Actors) != "[]" {
-				t.Errorf("actors = %s, want []", raw.Update.Actors)
+		Body: granularACL,
+		Assert: func(t *testing.T, r *http.Request, _ []byte) {
+			if got := r.URL.RawQuery; got != "detail=granular" {
+				t.Errorf("query = %q, want detail=granular", got)
 			}
 		},
 	})
 	c := newTestClient(t, srv.Server)
-	err := c.ACLs.SetPermission(context.Background(), "nodes", "web01", "update", &ACE{
+
+	acl, resp, err := c.ACLs.Get(context.Background(), ObjectACL(ACLNodes, "web01"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if resp == nil {
+		t.Error("Get returned a nil *Response")
+	}
+	want := ACE{Actors: []string{}, Users: []string{"pivotal"}, Clients: []string{}, Groups: []string{"admins"}}
+	if !reflect.DeepEqual(acl.Create, want) {
+		t.Errorf("create = %+v, want %+v", acl.Create, want)
+	}
+	if !reflect.DeepEqual(acl.Read.Clients, []string{"web01"}) || len(acl.Read.Users) != 0 {
+		t.Errorf("read = %+v", acl.Read)
+	}
+}
+
+// A server that ignores detail=granular answers with the flat form; the names
+// land in Actors.
+func TestACLs_GetFlatForm(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("GET /users/janedoe/_acl", cinctest.Route{
+		Body: `{"update":{"actors":["janedoe"],"groups":[]}}`,
+	})
+	c := newTestClient(t, srv.Server)
+
+	acl, _, err := c.ACLs.Get(context.Background(), UserACL("janedoe"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !reflect.DeepEqual(acl.Update.Actors, []string{"janedoe"}) || acl.Update.Users != nil {
+		t.Errorf("update = %+v", acl.Update)
+	}
+}
+
+// putBody registers a PUT route at path and stores its decoded body in got.
+func putBody(srv *cinctest.Server, path string, got *map[string]map[string]json.RawMessage) {
+	srv.Handle("PUT "+path, cinctest.Route{
+		Body: `{}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			if err := json.Unmarshal(body, got); err != nil {
+				t.Fatalf("decode %s: %v", body, err)
+			}
+		},
+	})
+}
+
+// rawJSON renders an ACE body's fields as compact JSON for comparison.
+func rawJSON(m map[string]json.RawMessage) map[string]string {
+	out := map[string]string{}
+	for k, v := range m {
+		out[k] = string(v)
+	}
+	return out
+}
+
+// An ACE with no users or clients is written in the flat form erchef has
+// always accepted: {"<perm>": {"actors": [...], "groups": [...]}}, with nil
+// lists sent as [] (acl_spec requires both keys as arrays).
+func TestACLs_SetPermissionFlatForm(t *testing.T) {
+	srv := cinctest.New(t)
+	var got map[string]map[string]json.RawMessage
+	putBody(srv, "/organizations/o/nodes/web01/_acl/update", &got)
+	c := newTestClient(t, srv.Server)
+
+	resp, err := c.ACLs.SetPermission(context.Background(), ObjectACL(ACLNodes, "web01"), "update", &ACE{
 		Groups: []string{"admins", "ops"},
 	})
 	if err != nil {
 		t.Fatalf("SetPermission: %v", err)
+	}
+	if resp == nil {
+		t.Error("SetPermission returned a nil *Response")
+	}
+	want := map[string]string{"actors": `[]`, "groups": `["admins","ops"]`}
+	if !reflect.DeepEqual(rawJSON(got["update"]), want) {
+		t.Errorf("PUT update = %v, want %v", rawJSON(got["update"]), want)
+	}
+}
+
+// An ACE with users or clients is written in the granular form. erchef's
+// acl_spec requires "actors" and "groups" on every write, and
+// validate_actors_clients_users requires "users" and "clients" together with
+// "actors": [] (oc_chef_authz_acl.erl:51-90), so all four keys are sent.
+func TestACLs_SetPermissionGranularForm(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ace  ACE
+		want map[string]string
+	}{
+		{"users only", ACE{Users: []string{"jenkins"}},
+			map[string]string{"actors": `[]`, "users": `["jenkins"]`, "clients": `[]`, "groups": `[]`}},
+		{"clients only", ACE{Clients: []string{"jenkins"}, Groups: []string{"admins"}},
+			map[string]string{"actors": `[]`, "users": `[]`, "clients": `["jenkins"]`, "groups": `["admins"]`}},
+		{"both", ACE{Actors: []string{}, Users: []string{"jenkins"}, Clients: []string{"jenkins"}},
+			map[string]string{"actors": `[]`, "users": `["jenkins"]`, "clients": `["jenkins"]`, "groups": `[]`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := cinctest.New(t)
+			var got map[string]map[string]json.RawMessage
+			putBody(srv, "/organizations/o/organizations/_acl/read", &got)
+			c := newTestClient(t, srv.Server)
+			if _, err := c.ACLs.SetPermission(context.Background(), OrgACL(), "read", &tc.ace); err != nil {
+				t.Fatalf("SetPermission: %v", err)
+			}
+			if !reflect.DeepEqual(rawJSON(got["read"]), tc.want) {
+				t.Errorf("PUT read = %v, want %v", rawJSON(got["read"]), tc.want)
+			}
+		})
+	}
+}
+
+// erchef refuses an ACE with names in both actors and users/clients
+// (actors_must_be_empty, a 400). Refuse it before sending, and refuse a nil
+// ACE rather than panicking.
+func TestACLs_SetPermissionRejectsBadACE(t *testing.T) {
+	srv := cinctest.New(t) // no routes: any request fails the test
+	c := newTestClient(t, srv.Server)
+	ctx := context.Background()
+	_, err := c.ACLs.SetPermission(ctx, ObjectACL(ACLNodes, "n1"), "read",
+		&ACE{Actors: []string{"alice"}, Users: []string{"bob"}})
+	if err == nil || !strings.Contains(err.Error(), "Actors") {
+		t.Errorf("mixed ACE: err = %v, want an error naming Actors", err)
+	}
+	if _, err := c.ACLs.SetPermission(ctx, ObjectACL(ACLNodes, "n1"), "read", nil); err == nil {
+		t.Error("nil ACE: no error")
 	}
 }
 
@@ -89,51 +179,12 @@ func TestACLs_AcceptsAnyObjectType(t *testing.T) {
 	c := newTestClient(t, srv.Server)
 	ctx := context.Background()
 	for _, tc := range []struct{ kind, name string }{
-		{"clients", "c1"}, {"groups", "devs"},
-		{"policies", "appserver"}, {"containers", "nodes"},
+		{ACLClients, "c1"}, {ACLGroups, "devs"},
+		{ACLPolicies, "appserver"}, {ACLContainers, "nodes"},
 	} {
-		if _, _, err := c.ACLs.Get(ctx, tc.kind, tc.name); err != nil {
+		if _, _, err := c.ACLs.Get(ctx, ObjectACL(tc.kind, tc.name)); err != nil {
 			t.Errorf("Get(%s, %s): %v", tc.kind, tc.name, err)
 		}
-	}
-}
-
-func TestACLs_GetOrg(t *testing.T) {
-	// erchef routes the organization object's own ACL at
-	// /organizations/ORG/organizations/_acl (oc_chef_wm dispatch.conf). The
-	// shorter /organizations/ORG/_acl matches no route on a real server.
-	srv := cinctest.New(t)
-	srv.Handle("GET /organizations/o/organizations/_acl", cinctest.Route{
-		Body: `{"read":{"actors":[],"groups":["admins"]}}`,
-	})
-	c := newTestClient(t, srv.Server)
-
-	acl, _, err := c.ACLs.GetOrg(context.Background())
-	if err != nil {
-		t.Fatalf("GetOrg: %v", err)
-	}
-	if !reflect.DeepEqual(acl.Read.Groups, []string{"admins"}) {
-		t.Errorf("read.groups = %v", acl.Read.Groups)
-	}
-}
-
-func TestACLs_SetOrgPermission(t *testing.T) {
-	srv := cinctest.New(t)
-	srv.Handle("PUT /organizations/o/organizations/_acl/grant", cinctest.Route{
-		Body: `{}`,
-		Assert: func(t *testing.T, _ *http.Request, body []byte) {
-			var req map[string]ACE
-			json.Unmarshal(body, &req)
-			if !reflect.DeepEqual(req["grant"].Groups, []string{"admins"}) {
-				t.Errorf("PUT body = %s", body)
-			}
-		},
-	})
-	c := newTestClient(t, srv.Server)
-	if err := c.ACLs.SetOrgPermission(context.Background(), "grant", &ACE{
-		Groups: []string{"admins"},
-	}); err != nil {
-		t.Fatalf("SetOrgPermission: %v", err)
 	}
 }
 
@@ -153,11 +204,11 @@ func TestACLs_OrgACLEscapesOrgName(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, _, err := c.ACLs.GetOrg(ctx); err != nil {
-		t.Fatalf("GetOrg: %v", err)
+	if _, _, err := c.ACLs.Get(ctx, OrgACL()); err != nil {
+		t.Fatalf("Get: %v", err)
 	}
-	if err := c.ACLs.SetOrgPermission(ctx, "read", &ACE{}); err != nil {
-		t.Fatalf("SetOrgPermission: %v", err)
+	if _, err := c.ACLs.SetPermission(ctx, OrgACL(), "read", &ACE{}); err != nil {
+		t.Fatalf("SetPermission: %v", err)
 	}
 	want := []string{
 		"GET /organizations/a%20b%2Fc/organizations/_acl",
@@ -165,43 +216,6 @@ func TestACLs_OrgACLEscapesOrgName(t *testing.T) {
 	}
 	if !reflect.DeepEqual(wire, want) {
 		t.Errorf("wire = %q, want %q", wire, want)
-	}
-}
-
-func TestACLs_GetUser(t *testing.T) {
-	// A global user's ACL is top-level, not org-scoped.
-	srv := cinctest.New(t)
-	srv.Handle("GET /users/janedoe/_acl", cinctest.Route{
-		Body: `{"update":{"actors":["janedoe"],"groups":[]}}`,
-	})
-	c := newTestClient(t, srv.Server)
-
-	acl, _, err := c.ACLs.GetUser(context.Background(), "janedoe")
-	if err != nil {
-		t.Fatalf("GetUser: %v", err)
-	}
-	if !reflect.DeepEqual(acl.Update.Actors, []string{"janedoe"}) {
-		t.Errorf("update.actors = %v", acl.Update.Actors)
-	}
-}
-
-func TestACLs_SetUserPermission(t *testing.T) {
-	srv := cinctest.New(t)
-	srv.Handle("PUT /users/janedoe/_acl/grant", cinctest.Route{
-		Body: `{}`,
-		Assert: func(t *testing.T, _ *http.Request, body []byte) {
-			var req map[string]ACE
-			json.Unmarshal(body, &req)
-			if !reflect.DeepEqual(req["grant"].Actors, []string{"janedoe"}) {
-				t.Errorf("PUT body = %s", body)
-			}
-		},
-	})
-	c := newTestClient(t, srv.Server)
-	if err := c.ACLs.SetUserPermission(context.Background(), "janedoe", "grant", &ACE{
-		Actors: []string{"janedoe"},
-	}); err != nil {
-		t.Fatalf("SetUserPermission: %v", err)
 	}
 }
 
@@ -213,10 +227,10 @@ func TestExpandPerm(t *testing.T) {
 	if !reflect.DeepEqual(all, []string{"create", "read", "update", "delete", "grant"}) {
 		t.Errorf("ExpandPerm(all) = %v", all)
 	}
-	// The returned slice must be independent of the package var.
+	// The returned slice must be independent of the package's list.
 	all[0] = "mutated"
-	if ACLPerms[0] != "create" {
-		t.Errorf("ExpandPerm(all) aliased ACLPerms: %v", ACLPerms)
+	if again, _ := ExpandPerm("all"); again[0] != "create" {
+		t.Errorf("ExpandPerm(all) aliased its list: %v", again)
 	}
 
 	one, err := ExpandPerm("read")
@@ -232,9 +246,29 @@ func TestExpandPerm(t *testing.T) {
 	}
 }
 
+// ACLPerms hands out a fresh copy: a caller that edits it changes nothing
+// else, neither later calls nor ExpandPerm.
+func TestACLPerms_IsACopy(t *testing.T) {
+	want := []string{"create", "read", "update", "delete", "grant"}
+	p := ACLPerms()
+	if !reflect.DeepEqual(p, want) {
+		t.Fatalf("ACLPerms() = %v, want %v", p, want)
+	}
+	p[0] = "x"
+	if got := ACLPerms(); !reflect.DeepEqual(got, want) {
+		t.Errorf("after editing a copy, ACLPerms() = %v", got)
+	}
+	if _, err := ExpandPerm("create"); err != nil {
+		t.Errorf("after editing a copy, ExpandPerm(create) = %v", err)
+	}
+	if _, err := ExpandPerm("x"); err == nil {
+		t.Error(`after editing a copy, ExpandPerm("x") succeeded`)
+	}
+}
+
 func TestACL_ACEFor(t *testing.T) {
 	acl := &ACL{}
-	for _, perm := range ACLPerms {
+	for _, perm := range ACLPerms() {
 		ace, err := acl.ACEFor(perm)
 		if err != nil {
 			t.Fatalf("ACEFor(%s): %v", perm, err)
@@ -255,44 +289,57 @@ func TestACL_ACEFor(t *testing.T) {
 }
 
 func TestACE_AddMembers(t *testing.T) {
-	ace := &ACE{Actors: []string{"alice"}, Groups: []string{"admins"}}
+	ace := &ACE{Users: []string{"alice"}, Groups: []string{"admins"}}
 
-	// Adding a brand-new actor and group changes the ACE.
-	if !ace.AddMembers([]string{"bob"}, []string{"ops"}) {
+	// Adding a brand-new user, client and group changes the ACE. A client
+	// named like an existing user is a different member.
+	if !ace.AddMembers(ACLMembers{Users: []string{"bob"}, Clients: []string{"alice"}, Groups: []string{"ops"}}) {
 		t.Fatal("AddMembers should report a change")
 	}
-	if !reflect.DeepEqual(ace.Actors, []string{"alice", "bob"}) {
-		t.Errorf("actors = %v", ace.Actors)
-	}
-	if !reflect.DeepEqual(ace.Groups, []string{"admins", "ops"}) {
-		t.Errorf("groups = %v", ace.Groups)
+	want := &ACE{Users: []string{"alice", "bob"}, Clients: []string{"alice"}, Groups: []string{"admins", "ops"}}
+	if !reflect.DeepEqual(ace, want) {
+		t.Errorf("ace = %+v, want %+v", ace, want)
 	}
 
 	// Re-adding existing members is a no-op (deduped).
-	if ace.AddMembers([]string{"alice", "bob"}, []string{"admins"}) {
+	if ace.AddMembers(ACLMembers{Users: []string{"alice", "bob"}, Clients: []string{"alice"}, Groups: []string{"admins"}}) {
 		t.Error("AddMembers of existing members should report no change")
 	}
-	if !reflect.DeepEqual(ace.Actors, []string{"alice", "bob"}) {
-		t.Errorf("actors after no-op add = %v", ace.Actors)
+	if !reflect.DeepEqual(ace, want) {
+		t.Errorf("ace after no-op add = %+v", ace)
 	}
 }
 
 func TestACE_RemoveMembers(t *testing.T) {
-	ace := &ACE{Actors: []string{"alice", "bob"}, Groups: []string{"admins", "ops"}}
+	ace := &ACE{Users: []string{"alice", "bob"}, Clients: []string{"bob"}, Groups: []string{"admins", "ops"}}
 
-	if !ace.RemoveMembers([]string{"bob"}, []string{"ops"}) {
+	// Removing client bob leaves user bob.
+	if !ace.RemoveMembers(ACLMembers{Clients: []string{"bob"}, Groups: []string{"ops"}}) {
 		t.Fatal("RemoveMembers should report a change")
 	}
-	if !reflect.DeepEqual(ace.Actors, []string{"alice"}) {
-		t.Errorf("actors = %v", ace.Actors)
+	want := &ACE{Users: []string{"alice", "bob"}, Clients: []string{}, Groups: []string{"admins"}}
+	if !reflect.DeepEqual(ace, want) {
+		t.Errorf("ace = %+v, want %+v", ace, want)
 	}
-	if !reflect.DeepEqual(ace.Groups, []string{"admins"}) {
-		t.Errorf("groups = %v", ace.Groups)
+	if !ace.RemoveMembers(ACLMembers{Users: []string{"bob"}}) {
+		t.Fatal("RemoveMembers(user bob) should report a change")
 	}
 
 	// Removing absent members is a no-op.
-	if ace.RemoveMembers([]string{"carol"}, []string{"temps"}) {
+	if ace.RemoveMembers(ACLMembers{Users: []string{"carol"}, Clients: []string{"alice"}, Groups: []string{"temps"}}) {
 		t.Error("RemoveMembers of absent members should report no change")
+	}
+}
+
+// A list the server returned with a repeated name must lose every copy, or a
+// revoke leaves the member granted.
+func TestACE_RemoveMembers_RemovesEveryCopy(t *testing.T) {
+	a := &ACE{Users: []string{"alice", "bob", "alice"}, Groups: []string{}}
+	if !a.RemoveMembers(ACLMembers{Users: []string{"alice"}}) {
+		t.Fatal("RemoveMembers reported no change")
+	}
+	if len(a.Users) != 1 || a.Users[0] != "bob" {
+		t.Errorf("users = %v, want [bob]", a.Users)
 	}
 }
 
@@ -301,7 +348,7 @@ func TestACLs_GetNotFound(t *testing.T) {
 	srv.Handle("GET /organizations/o/nodes/missing/_acl",
 		cinctest.Route{Status: 404, Body: `{"error":["not found"]}`})
 	c := newTestClient(t, srv.Server)
-	if _, _, err := c.ACLs.Get(context.Background(), "nodes", "missing"); err == nil {
+	if _, _, err := c.ACLs.Get(context.Background(), ObjectACL(ACLNodes, "missing")); err == nil {
 		t.Fatal("expected 404")
 	}
 }
@@ -313,52 +360,31 @@ func TestSetPermission_RejectsInvalidPerm(t *testing.T) {
 		t.Run(perm, func(t *testing.T) {
 			srv := cinctest.New(t) // any request fails the test: no routes registered
 			c := newTestClient(t, srv.Server)
-			err := c.ACLs.SetPermission(context.Background(), "nodes", "n1", perm,
-				&ACE{Groups: []string{"admins"}})
-			if err == nil {
-				t.Fatalf("SetPermission(%q) returned nil error", perm)
-			}
-			if !strings.Contains(err.Error(), "unknown permission") {
-				t.Errorf("err = %v, want an unknown-permission error", err)
+			for _, target := range []ACLTarget{ObjectACL(ACLNodes, "n1"), OrgACL(), UserACL("u")} {
+				_, err := c.ACLs.SetPermission(context.Background(), target, perm,
+					&ACE{Groups: []string{"admins"}})
+				if err == nil {
+					t.Fatalf("SetPermission(%v, %q) returned nil error", target, perm)
+				}
+				if !strings.Contains(err.Error(), "unknown permission") {
+					t.Errorf("err = %v, want an unknown-permission error", err)
+				}
 			}
 		})
-	}
-}
-
-func TestSetOrgAndUserPermission_RejectInvalidPerm(t *testing.T) {
-	srv := cinctest.New(t)
-	c := newTestClient(t, srv.Server)
-	if err := c.ACLs.SetOrgPermission(context.Background(), "all", &ACE{}); err == nil {
-		t.Error("SetOrgPermission(\"all\") returned nil error")
-	}
-	if err := c.ACLs.SetUserPermission(context.Background(), "u", "all", &ACE{}); err == nil {
-		t.Error("SetUserPermission(\"all\") returned nil error")
 	}
 }
 
 // Every standard permission is still accepted.
 func TestSetPermission_AcceptsEveryStandardPerm(t *testing.T) {
-	for _, perm := range ACLPerms {
+	for _, perm := range ACLPerms() {
 		t.Run(perm, func(t *testing.T) {
 			srv := cinctest.New(t)
 			srv.Handle("PUT /organizations/o/nodes/n1/_acl/"+perm, cinctest.Route{Body: `{}`})
 			c := newTestClient(t, srv.Server)
-			if err := c.ACLs.SetPermission(context.Background(), "nodes", "n1", perm, &ACE{}); err != nil {
+			if _, err := c.ACLs.SetPermission(context.Background(), ObjectACL(ACLNodes, "n1"), perm, &ACE{}); err != nil {
 				t.Errorf("SetPermission(%q): %v", perm, err)
 			}
 		})
-	}
-}
-
-// A list the server returned with a repeated name must lose every copy, or a
-// revoke leaves the actor granted.
-func TestACE_RemoveMembers_RemovesEveryCopy(t *testing.T) {
-	a := &ACE{Actors: []string{"alice", "bob", "alice"}, Groups: []string{}}
-	if !a.RemoveMembers([]string{"alice"}, nil) {
-		t.Fatal("RemoveMembers reported no change")
-	}
-	if len(a.Actors) != 1 || a.Actors[0] != "bob" {
-		t.Errorf("actors = %v, want [bob]", a.Actors)
 	}
 }
 
