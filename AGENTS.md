@@ -25,8 +25,10 @@ commands and PR conventions).
   c := newTestClient(t, srv.Server)
   ```
   `Route.Assert` is a callback for inspecting the incoming request.
-  The harness fails any test that issues an unsigned request, so
-  signing is exercised on every call automatically.
+  The harness verifies every request's RSA signature against
+  `testdata/test_key.pem` over the escaped wire path, as erchef does, and
+  fails the test on a bad or missing one, so signing (and any path the
+  signature does not cover) is exercised on every call automatically.
 - For requests outside the harness (path traversal, raw bookshelf
   uploads, etc.) set `srv.Server.Config.Handler` directly.
 - Write tests **first**: red → implement → green. New files should land
