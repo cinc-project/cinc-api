@@ -290,8 +290,12 @@ func (s *SearchService) eachPage(ctx context.Context, index, query string, opts 
 		if !fn(res, offset) {
 			return nil
 		}
-		offset += len(res.Rows)
-		if len(res.Rows) == 0 || offset >= res.Total {
+		// Advance by the page size asked for, not the rows that came back:
+		// the server drops objects deleted since they were indexed from a
+		// page, while Total still counts them. A short or empty page is not
+		// the end (chef-client's Search::Query pages the same way).
+		offset += p.rows
+		if p.rows <= 0 || offset >= res.Total {
 			return nil
 		}
 	}
