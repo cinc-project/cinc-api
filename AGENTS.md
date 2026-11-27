@@ -74,6 +74,12 @@ file new ones at cinc-project/cinc-server-ng):
   sends only `{"uri"}` (`oc_chef_wm_named_user:finalize_update_body`), which
   is why `Users.Update` returns no `*User`. Client, org and group PUTs echo
   the object on both.
+- **cinc-server-ng** does not rename a client or user whose PUT body names
+  a different one: it answers 200 and stores the new body under the old
+  name. erchef renames and answers 201 with a `Location`
+  (`oc_chef_wm_base:update_from_json` → `handle_rename`), which is what
+  `Clients.Update(name, cl)` and `Users.Update(name, u)` rely on; the
+  `clients/rename` and `users/rename` cases are gaps there.
 - **cinc-server-ng** accepts `POST .../keys` with neither `create_key` nor
   `public_key` (it generates one) and without `expiration_date` (it stores
   `infinity`). erchef rejects both with a 400; `KeyScope.Create` fills them in.

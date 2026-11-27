@@ -32,7 +32,7 @@ func testUserLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	// is checked through a fresh Get rather than Update's return value.
 	got.DisplayName = "Renamed " + name
 	got.LastName = "Updated"
-	if _, err := c.Users.Update(ctx, got); err != nil {
+	if _, err := c.Users.Update(ctx, name, got); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	again, _, err := c.Users.Get(ctx, name)
@@ -48,6 +48,36 @@ func testUserLifecycle(t *testing.T, _ Target, c *cinc.Client) {
 	}
 	if _, _, err := c.Users.Get(ctx, name); !errors.Is(err, cinc.ErrNotFound) {
 		t.Fatalf("Get after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+// testUserRename renames a user through Update: the body carries the new
+// username, the path the old one. The user keeps its key and password.
+func testUserRename(t *testing.T, tgt Target, c *cinc.Client) {
+	ctx := t.Context()
+	oldName, key := newUser(t, c)
+	newName := uniqueName(t, "user")
+	cleanup(t, "user "+newName, func(ctx context.Context) error {
+		_, err := c.Users.Delete(ctx, newName)
+		return err
+	})
+	got, _, err := c.Users.Get(ctx, oldName)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	got.Username = newName
+	if _, err := c.Users.Update(ctx, oldName, got); err != nil {
+		t.Fatalf("Update to rename: %v", err)
+	}
+	if _, _, err := c.Users.Get(ctx, oldName); !errors.Is(err, cinc.ErrNotFound) {
+		t.Fatalf("Get old name after rename: err = %v, want ErrNotFound", err)
+	}
+	again, _, err := c.Users.Get(ctx, newName)
+	if err != nil || again.Username != newName || again.Email != got.Email {
+		t.Fatalf("Get new name after rename: %+v %v", again, err)
+	}
+	if _, _, err := clientAs(t, tgt, newName, key).Users.Get(ctx, newName); err != nil {
+		t.Fatalf("Get as the renamed user with its original key: %v", err)
 	}
 }
 

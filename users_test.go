@@ -107,7 +107,7 @@ func TestUsers_Update(t *testing.T) {
 		},
 	})
 	c := newTestClient(t, srv.Server)
-	resp, err := c.Users.Update(context.Background(), &User{
+	resp, err := c.Users.Update(context.Background(), "alice", &User{
 		Username: "alice", DisplayName: "Alice Renamed", Email: "alice@example.com",
 	})
 	if err != nil {
@@ -115,6 +115,64 @@ func TestUsers_Update(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d", resp.StatusCode)
+	}
+}
+
+// A PUT whose body carries a different username renames the user: erchef
+// answers 201 with a Location for the new name (oc_chef_wm_base:handle_rename)
+// and a body of just the new uri (oc_chef_wm_named_user:finalize_update_body).
+func TestUsers_Update_Rename(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("PUT /users/alice", cinctest.Route{
+		Status: 201,
+		Body:   `{"uri":"https://chef.example.com/users/alicia"}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var got map[string]any
+			json.Unmarshal(body, &got)
+			if got["username"] != "alicia" {
+				t.Errorf("PUT body username = %v, want alicia", got["username"])
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	resp, err := c.Users.Update(context.Background(), "alice", &User{
+		Username: "alicia", DisplayName: "Alicia", Email: "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", resp.StatusCode)
+	}
+}
+
+func TestUsers_Update_EmptyUsernameKeepsName(t *testing.T) {
+	srv := cinctest.New(t)
+	srv.Handle("PUT /users/alice", cinctest.Route{
+		Body: `{"uri":"https://chef.example.com/users/alice"}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			var got map[string]any
+			json.Unmarshal(body, &got)
+			if got["username"] != "alice" {
+				t.Errorf("PUT body username = %v, want alice from the path", got["username"])
+			}
+		},
+	})
+	c := newTestClient(t, srv.Server)
+	u := &User{DisplayName: "Alice", Email: "alice@example.com"}
+	if _, err := c.Users.Update(context.Background(), "alice", u); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if u.Username != "" {
+		t.Errorf("Update modified its argument: %+v", u)
+	}
+}
+
+func TestUsers_Update_EmptyName(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	if _, err := c.Users.Update(context.Background(), "", &User{Username: "x"}); err == nil {
+		t.Fatal("Update with an empty name succeeded")
 	}
 }
 

@@ -38,7 +38,7 @@ following endpoint families are implemented:
 | -------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | `c.ACLs`             | `/<object>/<name>/_acl`               | Get / SetPermission / Grant / Revoke on an `ACLTarget` (`ObjectACL`, `OrgACL`, `UserACL`); users and clients kept apart (`detail=granular`) |
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/AcceptInvite/RejectInvite) and ListUserOrgs |
-| `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
+| `c.Clients`          | `/clients`                            | List / Get / Create / Update (can rename) / Delete / Reregister (in place) |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
 | `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload; `CookbookArtifactListEntry.Has(identifier)` |
@@ -58,7 +58,7 @@ following endpoint families are implemented:
 | `c.Stats`            | `/_stats` (top-level, Basic auth)     | Get (Erchef/PostgreSQL/VM metrics; not Chef-signed)                 |
 | `c.Status`           | `/_status`                            | Get (server health + keygen pool)                                    |
 | `c.Universe`         | `/universe`                           | Get (known cookbooks + dependencies)                                 |
-| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update / Delete / SetPassword / Authenticate   |
+| `c.Users`            | `/users` (top-level)                  | List / Get / Create / Update (can rename) / Delete / SetPassword / Authenticate |
 | `c.Do` / `c.Fetch` / `c.Upload` | any path / any URL                    | `Do` sends a signed request to an absolute path and returns the body byte-for-byte (no decode); `ContextWithServerAPIVersion(ctx, v)` picks the API version per request. `Fetch` makes an unsigned GET (e.g. a bookshelf URL) and hands the body to a callback, retrying a truncated body with a fresh reader. `Upload` PUTs a file to a pre-signed sandbox URL (unsigned, Content-MD5, explicit length), reopening the body per attempt |
 
 Configurable via options: `WithHTTPClient`, `WithUserAgent`,
@@ -125,16 +125,24 @@ model, so callers don't re-encode server conventions:
   have no optimistic concurrency, so a concurrent write in between (such as
   a chef-client run) is overwritten.
 - `Clients.Create` and `Users.Create` ask the server to generate the
-  `default` keypair (returned in `ChefKey.PrivateKey`) unless a `PublicKey` is
-  set; under API v1 the server would otherwise create them without a key.
+  `default` keypair unless a `PublicKey` is set; under API v1 the server
+  would otherwise create them without a key. Each returns its own result
+  (`ClientCreateResult`, `UserCreateResult`) carrying the new `URI` and the
+  key as `ChefKey`, whose `PrivateKey` is the only copy of a generated key.
   `KeyScope.Create` does the same for an added key, and sends an empty
   `ExpirationDate` as `"infinity"`, since the server requires one.
 - `Users.SetPassword(name, password)` — change a password. The server's user
   PUT is a full update, so this re-sends the user's current fields with it.
 - `SuperuserName` — `"pivotal"`, the built-in superuser that creating orgs,
   `/authenticate_user` and invitation-free org membership are reserved to.
-- `Clients.Reregister(name)` — regenerate a client's `default` key and return
-  the new private key (creating one if the client has none).
+- `Clients.Update(name, cl)` and `Users.Update(name, u)` — the path is the
+  current name and the body the new values, so setting a different
+  `Name`/`Username` renames the client or user (the server answers 201).
+- `Clients.Reregister(name)` — regenerate a client's `default` key in place
+  (one `PUT .../keys/default` with `create_key`) and return the new pair,
+  keeping the key's expiration; a client with no default key gets one
+  created. A client cannot reregister the key it signs with: the server
+  answers 403.
 - `ParsePolicyfileLock(data)` / `LoadPolicyfileLock(path)` — parse a
   `Policyfile.lock.json` into a `PolicyRevision`. The policy name, revision
   id, cookbook lock names and identifiers are checked against the patterns

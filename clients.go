@@ -3,7 +3,6 @@ package cinc
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
 // APIClient is a Chef API client (node or validator identity). It is named
@@ -17,8 +16,14 @@ type APIClient struct {
 	// Only Create sends it; Update does not, because the server rejects key
 	// fields on update — manage keys with Keys.Client(name).
 	PublicKey string `json:"public_key,omitempty"`
+}
 
-	// ChefKey is populated only on the Create response. It is never sent.
+// ClientCreateResult is the response from POST /clients: the new client's URI
+// and its "default" key. Unless the APIClient carried a PublicKey,
+// ChefKey.PrivateKey holds the server-generated private key. The server keeps
+// no copy: capture it before the response is dropped.
+type ClientCreateResult struct {
+	URI     string  `json:"uri,omitempty"`
 	ChefKey ChefKey `json:"chef_key,omitzero"`
 }
 
@@ -39,14 +44,6 @@ type clientUpdateRequest struct {
 	Validator bool   `json:"validator"`
 }
 
-// ChefKey holds key material returned when a client is created.
-type ChefKey struct {
-	Name           string `json:"name,omitempty"`
-	PublicKey      string `json:"public_key,omitempty"`
-	PrivateKey     string `json:"private_key,omitempty"`
-	ExpirationDate string `json:"expiration_date,omitempty"`
-}
-
 // ClientsService accesses the /clients endpoints.
 type ClientsService struct{ client *Client }
 
@@ -63,22 +60,31 @@ func (s *ClientsService) Get(ctx context.Context, name string) (*APIClient, *Res
 // Create creates a new client. Unless cl.PublicKey is set, the server generates
 // the client's "default" keypair and the result's ChefKey.PrivateKey carries
 // the private half — the only chance to capture it.
-func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*APIClient, *Response, error) {
+func (s *ClientsService) Create(ctx context.Context, cl *APIClient) (*ClientCreateResult, *Response, error) {
 	req := clientCreateRequest{
 		Name:      cl.Name,
 		Validator: cl.Validator,
 		PublicKey: cl.PublicKey,
 		CreateKey: cl.PublicKey == "",
 	}
-	created, resp, err := s.res().create(ctx, req)
-	return ptrOrNil(created, err), resp, err
+	r, resp, err := do[ClientCreateResult](ctx, s.client, "POST", s.res().coll(), req)
+	return ptrOrNil(r, err), resp, err
 }
 
-// Update replaces an existing client's name and validator flag. Key fields on
-// cl are not sent; manage keys with Keys.Client(name).
-func (s *ClientsService) Update(ctx context.Context, cl *APIClient) (*APIClient, *Response, error) {
+// Update replaces the named client's name and validator flag with cl's and
+// returns the client as stored. To rename the client, set cl.Name to the new
+// name: the server then answers 201 with the new location. An empty cl.Name
+// keeps the current one. Key fields on cl are not sent; manage keys with
+// Keys.Client(name).
+func (s *ClientsService) Update(ctx context.Context, name string, cl *APIClient) (*APIClient, *Response, error) {
+	if name == "" {
+		return nil, nil, errors.New("cinc: Clients.Update needs the client's current name")
+	}
 	req := clientUpdateRequest{Name: cl.Name, Validator: cl.Validator}
-	updated, resp, err := s.res().update(ctx, cl.Name, req)
+	if req.Name == "" {
+		req.Name = name
+	}
+	updated, resp, err := s.res().update(ctx, name, req)
 	return ptrOrNil(updated, err), resp, err
 }
 
@@ -92,28 +98,18 @@ func (s *ClientsService) List(ctx context.Context) (map[string]string, *Response
 	return s.res().list(ctx)
 }
 
-// Reregister regenerates the named client's "default" key, invalidating the
-// old private key and returning the new one (in the result's PrivateKey).
+// Reregister regenerates the named client's "default" key in place,
+// invalidating the old private key, and returns the new pair (PrivateKey and
+// PublicKey). The key keeps its expiration date. A client with no default key
+// gets one created, with no expiration.
 //
-// The keys API has no in-place regenerate, so this deletes the existing
-// "default" key and creates a fresh one with the server generating the pair.
-// A client with no default key (the delete 404s) simply gets one created.
-// The two calls are not atomic: if the create fails after the delete, the
-// client is briefly left without a default key, and the returned error says so
-// — recover by adding a key with Keys.Client(name).Create.
+// The server will not regenerate the key a request is signed with, so a client
+// cannot reregister itself; it answers 403 and the key is unchanged.
 func (s *ClientsService) Reregister(ctx context.Context, name string) (*Key, *Response, error) {
 	keys := s.client.Keys.Client(name)
-	_, err := keys.Delete(ctx, "default")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, nil, err
+	k, resp, err := keys.Update(ctx, "default", &Key{Name: "default", CreateKey: true})
+	if errors.Is(err, ErrNotFound) {
+		return keys.Create(ctx, &Key{Name: "default"})
 	}
-	deleted := err == nil
-	created, resp, err := keys.Create(ctx, &Key{Name: "default", CreateKey: true, ExpirationDate: "infinity"})
-	if err != nil && !deleted {
-		return nil, resp, err
-	}
-	if err != nil {
-		return nil, resp, fmt.Errorf("cinc: reregister %q deleted the old default key but could not create a new one (add one with Keys.Client(%q).Create): %w", name, name, err)
-	}
-	return created, resp, nil
+	return k, resp, err
 }
