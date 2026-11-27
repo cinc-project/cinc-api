@@ -76,7 +76,7 @@ func (s *CookbookArtifactsService) Upload(ctx context.Context, cb *LocalCookbook
 	// Work on a shallow copy so the caller's struct is not mutated.
 	artifact := *cb
 	artifact.Identifier = identifier
-	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &artifact); err != nil {
+	if err := uploadCookbook(ctx, s.client, "/cookbook_artifacts", &artifact, uploadOptions{}); err != nil {
 		return fmt.Errorf("cinc: upload cookbook artifact: %w", err)
 	}
 	return nil

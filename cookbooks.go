@@ -85,6 +85,10 @@ type Cookbook struct {
 	CookbookName string `json:"cookbook_name"`
 	Name         string `json:"name"`
 	Version      string `json:"version"`
+	// Frozen reports a version uploaded WithFreeze. The server refuses to
+	// replace a frozen version unless the upload is WithForce, and a version
+	// once frozen stays frozen.
+	Frozen bool `json:"frozen?,omitempty"`
 
 	// Metadata is the cookbook's compiled metadata (description, maintainer,
 	// license, dependencies, …), returned by the server alongside the file
@@ -244,9 +248,39 @@ func (s *CookbooksService) Delete(ctx context.Context, name, version string) (*R
 	return resp, err
 }
 
+// UploadOption configures Cookbooks.Upload.
+type UploadOption func(*uploadOptions)
+
+type uploadOptions struct {
+	freeze, force bool
+}
+
+// WithFreeze uploads the cookbook version frozen, as knife cookbook upload
+// --freeze does: the server then refuses to replace it unless an upload is
+// WithForce. Freezing cannot be undone.
+func WithFreeze() UploadOption { return func(o *uploadOptions) { o.freeze = true } }
+
+// WithForce replaces the version even if it is frozen, as knife cookbook
+// upload --force does. It does not unfreeze it.
+func WithForce() UploadOption { return func(o *uploadOptions) { o.force = true } }
+
 // Upload uploads a LocalCookbook: sandbox -> file PUTs -> version manifest PUT.
-func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook) error {
-	return uploadCookbook(ctx, s.client, "/cookbooks", cb)
+//
+// Replacing a frozen version without WithForce fails with an error matching
+// ErrCookbookFrozen (and ErrConflict).
+func (s *CookbooksService) Upload(ctx context.Context, cb *LocalCookbook, opts ...UploadOption) error {
+	var o uploadOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	err := uploadCookbook(ctx, s.client, "/cookbooks", cb, o)
+	// erchef's only 409 for a version PUT names the frozen version
+	// (chef_wm_cookbook_version conflict_message).
+	if er, ok := errors.AsType[*ErrorResponse](err); ok && er.StatusCode == http.StatusConflict &&
+		strings.Contains(er.ServerMessage(), "is frozen") {
+		return fmt.Errorf("%w: %w", ErrCookbookFrozen, err)
+	}
+	return err
 }
 
 // Download fetches a cookbook version manifest and writes its files to
@@ -408,12 +442,15 @@ func createTemp(root *os.Root, rel string) (string, *os.File, error) {
 const manifestAPIVersion = "2"
 
 // uploadCookbook implements the three-step upload, shared with cookbook_artifacts.
-func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook) error {
+func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbook, o uploadOptions) error {
 	// Build the manifest first, so a cookbook that disagrees with itself
 	// fails before anything is sent.
 	manifest, err := cookbookManifest(cb)
 	if err != nil {
 		return err
+	}
+	if o.freeze {
+		manifest["frozen?"] = true
 	}
 	hexes := make([]string, 0, len(cb.files))
 	for _, f := range cb.files {
@@ -456,8 +493,11 @@ func uploadCookbook(ctx context.Context, c *Client, base string, cb *LocalCookbo
 	if cb.Identifier != "" {
 		slug = cb.Identifier
 	}
-	_, _, err = do[map[string]any](withServerAPIVersion(ctx, manifestAPIVersion), c, "PUT",
-		c.orgPath(base+"/"+esc(cb.Name)+"/"+esc(slug)), manifest)
+	path := c.orgPath(base + "/" + esc(cb.Name) + "/" + esc(slug))
+	if o.force {
+		path += "?force=true"
+	}
+	_, _, err = do[map[string]any](withServerAPIVersion(ctx, manifestAPIVersion), c, "PUT", path, manifest)
 	if err != nil {
 		return fmt.Errorf("cinc: put cookbook manifest: %w", err)
 	}

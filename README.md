@@ -28,7 +28,7 @@ following endpoint families are implemented:
 | `c.Associations`     | `/organizations/O/users`, `/association_requests`, `/users/U/...` | Members (ListMembers/GetMember/AddMember/RemoveMember), org invites (ListInvites/Invite/RescindInvite), user invites (ListUserInvites/UserInviteCount/RespondInvite) and ListUserOrgs |
 | `c.Clients`          | `/clients`                            | List / Get / Create / Update / Delete / Reregister                   |
 | `c.Containers`       | `/containers`                         | List / Get / Create / Delete                                         |
-| `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
+| `c.Cookbooks`        | `/cookbooks`                          | List (latest version of each) / ListVersions (every cookbook, `num_versions`) / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow; `WithFreeze` / `WithForce`) / Download / DownloadFiles (from a fetched manifest) / ListLatest / ListRecipes |
 | `c.CookbookArtifacts`| `/cookbook_artifacts`                 | List / GetVersions (one artifact) / Get (with metadata) / Delete / Upload |
 | `c.DataBags`         | `/data`                               | List / Create / Delete; per-bag Items handle for CRUD plus GetDecrypted / CreateEncrypted / UpdateEncrypted; `DataBagItem.Encrypt`/`Decrypt`/`IsEncrypted` for the Chef encrypted-data-bag format (writes v3 AES-256-GCM, reads v1/v2/v3) |
 | `c.Cookbooks`        | `/cookbooks`                          | List / GetVersions (one cookbook, `num_versions`) / Get (with metadata) / Delete / Upload (sandbox flow) / Download / ListLatest / ListRecipes |
@@ -208,6 +208,10 @@ model, so callers don't re-encode server conventions:
   (`license "All rights reserved"`, `version "0.0.0"`,
   `eager_load_libraries true`, empty strings, `{}` and `[]`) for anything
   unset. A name is required.
+- `Cookbooks.Upload(cb, WithFreeze())` uploads a version frozen, as `knife
+  cookbook upload --freeze` does; replacing a frozen version then fails with
+  `ErrCookbookFrozen` (also `ErrConflict`) unless the upload is `WithForce()`.
+  `Cookbook.Frozen` reports the flag, which the server never clears.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,
