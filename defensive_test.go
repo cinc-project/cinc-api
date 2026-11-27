@@ -146,9 +146,11 @@ func TestDownloadFiles_RefusesCollidingPaths(t *testing.T) {
 		t.Errorf("cleaned duplicate: err = %v, want a same-file error", err)
 	}
 
-	err = c.Cookbooks.DownloadFiles(context.Background(),
-		&Cookbook{AllFilesManifest: []CookbookFileRef{ref("recipes/default.rb"), ref("recipes/DEFAULT.rb")}}, t.TempDir())
+	// On a case-sensitive filesystem the two are distinct files, which
+	// download normally, so only check the refusal where case folds.
 	if caseInsensitiveFS() {
+		err = c.Cookbooks.DownloadFiles(context.Background(),
+			&Cookbook{AllFilesManifest: []CookbookFileRef{ref("recipes/default.rb"), ref("recipes/DEFAULT.rb")}}, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "same file") {
 			t.Errorf("case-fold duplicate on %s: err = %v, want a same-file error", runtime.GOOS, err)
 		}
