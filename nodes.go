@@ -252,7 +252,7 @@ func (s *NodesService) Get(ctx context.Context, name string) (*Node, *Response, 
 // created object, so there is nothing to return but the response and any
 // error.
 func (s *NodesService) Create(ctx context.Context, n *Node) (*Response, error) {
-	_, resp, err := s.res().create(ctx, n)
+	_, resp, err := s.res().create(ctx, n.Name, n)
 	return resp, err
 }
 

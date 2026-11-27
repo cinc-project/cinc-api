@@ -134,8 +134,8 @@ func (s *GroupsService) Get(ctx context.Context, name string) (*Group, *Response
 // its members. The server identifies the new group by "groupname" (a "name"
 // key is rejected with a 400).
 func (s *GroupsService) Create(ctx context.Context, name string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "POST",
-		s.client.orgPath("/groups"), map[string]string{"groupname": name})
+	_, resp, err := doCreate[map[string]any](ctx, s.client,
+		s.client.orgPath("/groups"), name, map[string]string{"groupname": name})
 	return resp, err
 }
 

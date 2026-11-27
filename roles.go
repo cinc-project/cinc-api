@@ -51,7 +51,7 @@ func (s *RolesService) Get(ctx context.Context, name string) (*Role, *Response, 
 // created object, so there is nothing to return but the response and any
 // error.
 func (s *RolesService) Create(ctx context.Context, r *Role) (*Response, error) {
-	_, resp, err := s.res().create(ctx, r)
+	_, resp, err := s.res().create(ctx, r.Name, r)
 	return resp, err
 }
 

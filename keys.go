@@ -90,7 +90,7 @@ func (s *KeyScope) Create(ctx context.Context, k *Key) (*Key, *Response, error) 
 	if req.ExpirationDate == "" {
 		req.ExpirationDate = "infinity"
 	}
-	created, resp, err := do[Key](ctx, s.client, "POST", s.path, &req)
+	created, resp, err := doCreate[Key](ctx, s.client, s.path, k.Name, &req)
 	return ptrOrNil(created, err), resp, err
 }
 

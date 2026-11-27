@@ -104,6 +104,10 @@ model, so callers don't re-encode server conventions:
 - `ErrorResponse.ServerMessage()` — just the server's error message(s),
   joined with `; `, without `Error()`'s `cinc: METHOD PATH: CODE:` prefix or
   the 401 hint (`""` when the server sent none).
+- `ErrorResponse.Name`: the name of the object a create sent (`Nodes.Create`,
+  `Clients.Create`, `Users.Create`, `Keys.User(u).Create` and the other
+  creates of a named object), so a 409 on the collection path can say which
+  object already exists. `""` for any other request.
 - `GenerateKeyPair()` — mint a 2048-bit RSA key pair as PEM (the generation
   counterpart to `ParseKey`/`LoadKeyFile`).
 - `Node` accessors — `Tags`/`SetTags`/`AddTags`/`RemoveTags` (stored at

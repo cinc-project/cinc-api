@@ -40,7 +40,7 @@ func (s *OrgsService) Get(ctx context.Context, name string) (*Org, *Response, er
 // validator client name and its private key — capture the key, it is not
 // retrievable later.
 func (s *OrgsService) Create(ctx context.Context, o *Org) (*OrgCreateResult, *Response, error) {
-	r, resp, err := do[OrgCreateResult](ctx, s.client, "POST", "/organizations", o)
+	r, resp, err := doCreate[OrgCreateResult](ctx, s.client, "/organizations", o.Name, o)
 	return ptrOrNil(r, err), resp, err
 }
 

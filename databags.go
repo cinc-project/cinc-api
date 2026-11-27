@@ -67,8 +67,8 @@ func (s *DataBagsService) List(ctx context.Context) (map[string]string, *Respons
 
 // Create creates an empty data bag.
 func (s *DataBagsService) Create(ctx context.Context, name string) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "POST",
-		s.client.orgPath("/data"), map[string]string{"name": name})
+	_, resp, err := doCreate[map[string]any](ctx, s.client,
+		s.client.orgPath("/data"), name, map[string]string{"name": name})
 	return resp, err
 }
 
@@ -111,7 +111,8 @@ func (s *DataBagItemsService) Create(ctx context.Context, item DataBagItem) (Dat
 	if err := item.Validate(); err != nil {
 		return nil, nil, err
 	}
-	return s.write(ctx, "POST", s.coll(), item)
+	out, resp, err := s.write(ctx, "POST", s.coll(), item)
+	return out, resp, withName(err, item.ID())
 }
 
 // Update replaces an existing item. It returns an ErrMissingDataBagItemID
