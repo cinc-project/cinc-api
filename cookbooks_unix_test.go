@@ -32,7 +32,7 @@ func TestLocalCookbookFromDir_SkipsSpecialFiles(t *testing.T) {
 	}
 }
 
-// With SkipChefignore the chefignore is never read, so one that cannot be
+// With WithSkipChefignore the chefignore is never read, so one that cannot be
 // read does not fail the load.
 func TestLocalCookbookFromDir_SkipChefignoreDoesNotReadIt(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -49,8 +49,8 @@ func TestLocalCookbookFromDir_SkipChefignoreDoesNotReadIt(t *testing.T) {
 	if _, err := LocalCookbookFromDir(root, ""); err == nil {
 		t.Fatal("expected the default load to fail reading chefignore")
 	}
-	if _, err := LocalCookbookFromDir(root, "", SkipChefignore()); err != nil {
-		t.Fatalf("SkipChefignore: %v", err)
+	if _, err := LocalCookbookFromDir(root, "", WithSkipChefignore()); err != nil {
+		t.Fatalf("WithSkipChefignore: %v", err)
 	}
 }
 

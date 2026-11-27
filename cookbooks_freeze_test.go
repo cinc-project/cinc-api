@@ -14,7 +14,7 @@ import (
 // manifestPUT runs an upload of a small cookbook against a fake server and
 // returns the manifest PUT's query string and decoded body. The manifest PUT
 // answers with status and body.
-func manifestPUT(t *testing.T, status int, body string, opts ...UploadOption) (query string, manifest map[string]any, err error) {
+func manifestPUT(t *testing.T, status int, body string, opts ...CookbookUploadOption) (query string, manifest map[string]any, err error) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "web")
 	writeTree(t, root, manifestFixture)

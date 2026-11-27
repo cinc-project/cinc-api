@@ -233,6 +233,11 @@ model, so callers don't re-encode server conventions:
   cookbook upload --freeze` does; replacing a frozen version then fails with
   `ErrCookbookFrozen` (also `ErrConflict`) unless the upload is `WithForce()`.
   `Cookbook.Frozen` reports the flag, which the server never clears.
+- `WithUploadProgress(fn)` (for `Cookbooks.Upload` and
+  `CookbookArtifacts.Upload`) and `WithDownloadProgress(fn)` (for
+  `Cookbooks.Download` and `DownloadFiles`) report each file's
+  cookbook-relative path as it is uploaded or put in place, for progress
+  output. Transfers run in parallel, so `fn` may be called concurrently.
 - `LocalCookbookFromDir(dir, version)` — load a cookbook for
   `Cookbooks.Upload` / `CookbookArtifacts.Upload`. `LocalCookbook.Metadata`
   (a `CookbookMetadata`: name, version, description, maintainer, license,
@@ -242,7 +247,7 @@ model, so callers don't re-encode server conventions:
   needs a `metadata.json` or an edit to `Metadata`. An empty `version` uses
   the metadata's version (an error if `metadata.rb` computes it); one that
   disagrees with it is an error. `LocalCookbookFromDir(dir, version,
-  SkipChefignore())` keeps the files chefignore would drop (every other
+  WithSkipChefignore())` keeps the files chefignore would drop (every other
   selection rule still applies), for packaging a cookbook as-is; chef-cli
   always applies chefignore, so such a cookbook's `Identifiers()` are not the
   ones a `Policyfile.lock.json` should carry.
