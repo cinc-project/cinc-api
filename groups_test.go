@@ -110,7 +110,7 @@ func TestGroups_Update_WiresActorsFormat(t *testing.T) {
 		Clients: []string{"node1"},
 		Groups:  []string{"billing-admins"},
 	}
-	if _, _, err := c.Groups.Update(context.Background(), g); err != nil {
+	if _, _, err := c.Groups.Update(context.Background(), "devs", g); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestGroups_Update_NilSlicesBecomeEmptyArrays(t *testing.T) {
 		},
 	})
 	c := newTestClient(t, srv.Server)
-	if _, _, err := c.Groups.Update(context.Background(), &Group{Name: "empty"}); err != nil {
+	if _, _, err := c.Groups.Update(context.Background(), "empty", &Group{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 }
@@ -165,38 +165,103 @@ func TestGroups_NotFound(t *testing.T) {
 }
 
 // Chef identifies a group by "groupname"; "name" is a courtesy field not every
-// server populates. Update must not depend on the courtesy field.
-func TestGroupsUpdate_FallsBackToGroupName(t *testing.T) {
-	var path string
-	var req map[string]any
+// server populates. With Name empty, GroupName is the name to send.
+func TestGroups_Update_FallsBackToGroupName(t *testing.T) {
 	srv := cinctest.New(t)
 	srv.Handle("PUT /organizations/o/groups/admins", cinctest.Route{
-		Body: `{"groupname":"admins"}`,
-		Assert: func(t *testing.T, r *http.Request, body []byte) {
-			path = r.URL.Path
-			if err := json.Unmarshal(body, &req); err != nil {
-				t.Fatalf("decode PUT: %v", err)
+		Body: `{"groupname":"admins","actors":{"users":["alice"],"clients":[],"groups":[]}}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			if m := decodeBody(t, body); m["groupname"] != "admins" {
+				t.Errorf("body = %s, want groupname=admins", body)
 			}
 		},
 	})
 	c := newTestClient(t, srv.Server)
 	g := &Group{GroupName: "admins", Users: []string{"alice"}}
-	if _, _, err := c.Groups.Update(context.Background(), g); err != nil {
+	if _, _, err := c.Groups.Update(context.Background(), "admins", g); err != nil {
 		t.Fatalf("Update: %v", err)
-	}
-	if path != "/organizations/o/groups/admins" {
-		t.Errorf("PUT path = %q", path)
-	}
-	if req["groupname"] != "admins" {
-		t.Errorf("groupname = %v, want admins", req["groupname"])
 	}
 }
 
-// With neither field set the old code PUT to /groups/ with groupname:"".
-func TestGroupsUpdate_RequiresAName(t *testing.T) {
+// A PUT whose groupname differs from the path renames the group: erchef
+// answers 201 with a Location for the new name (oc_chef_wm_base:
+// update_from_json -> handle_rename) and echoes the request body, since
+// oc_chef_wm_named_group has no finalize_update_body. Only "groupname" is
+// read for the new name (oc_chef_group:update_from_ejson); "name" is not.
+func TestGroups_Update_Rename(t *testing.T) {
 	srv := cinctest.New(t)
+	srv.Handle("PUT /organizations/o/groups/devs", cinctest.Route{
+		Status: 201,
+		Body:   `{"groupname":"ops","actors":{"users":["alice"],"clients":[],"groups":[]}}`,
+		Assert: func(t *testing.T, _ *http.Request, body []byte) {
+			m := decodeBody(t, body)
+			if m["groupname"] != "ops" {
+				t.Errorf("body = %s, want groupname=ops", body)
+			}
+			if _, ok := m["name"]; ok {
+				t.Errorf("body = %s, want no name key", body)
+			}
+		},
+	})
 	c := newTestClient(t, srv.Server)
-	if _, _, err := c.Groups.Update(context.Background(), &Group{Users: []string{"alice"}}); err == nil {
-		t.Fatal("Update with no name returned nil error; want an error and no request")
+	for _, g := range []*Group{
+		{Name: "ops", Users: []string{"alice"}},
+		{GroupName: "ops", Users: []string{"alice"}},
+		{Name: "ops", GroupName: "ops", Users: []string{"alice"}},
+	} {
+		before := *g
+		updated, resp, err := c.Groups.Update(context.Background(), "devs", g)
+		if err != nil {
+			t.Fatalf("Update(%+v): %v", before, err)
+		}
+		if resp.StatusCode != http.StatusCreated || updated.Name != "ops" || updated.GroupName != "ops" ||
+			!reflect.DeepEqual(updated.Users, []string{"alice"}) {
+			t.Errorf("Update(%+v) = %+v (status %d), want ops with alice and 201", before, updated, resp.StatusCode)
+		}
+		if !reflect.DeepEqual(*g, before) {
+			t.Errorf("Update modified the caller's group: %+v, was %+v", *g, before)
+		}
+	}
+}
+
+func TestGroups_Update_Errors(t *testing.T) {
+	srv := cinctest.New(t) // no routes: neither call may reach the server
+	c := newTestClient(t, srv.Server)
+	if _, _, err := c.Groups.Update(context.Background(), "", &Group{Name: "devs"}); err == nil {
+		t.Error("Update with no current name returned nil error")
+	}
+	// Two different new names are ambiguous: refuse rather than guess.
+	if _, _, err := c.Groups.Update(context.Background(), "devs", &Group{Name: "ops", GroupName: "qa"}); err == nil {
+		t.Error("Update with Name and GroupName naming different new names returned nil error")
+	}
+}
+
+// A group read with Get carries its name in both Name and GroupName; changing
+// either one renames it, so a caller need not know which field is sent.
+func TestGroups_Update_RenameFromAFetchedGroup(t *testing.T) {
+	for _, g := range []*Group{
+		{Name: "ops", GroupName: "devs"},
+		{Name: "devs", GroupName: "ops"},
+		{Name: "ops", GroupName: "ops"},
+	} {
+		srv := cinctest.New(t)
+		var sent string
+		srv.Handle("PUT /organizations/o/groups/devs", cinctest.Route{
+			Status: 201,
+			Body:   `{"groupname":"ops","actors":{"users":[],"clients":[],"groups":[]}}`,
+			Assert: func(t *testing.T, _ *http.Request, body []byte) {
+				var b struct {
+					GroupName string `json:"groupname"`
+				}
+				json.Unmarshal(body, &b)
+				sent = b.GroupName
+			},
+		})
+		if _, _, err := newTestClient(t, srv.Server).Groups.Update(context.Background(), "devs", g); err != nil {
+			t.Fatalf("%+v: %v", g, err)
+		}
+		if sent != "ops" {
+			t.Errorf("%+v: sent groupname %q, want ops", g, sent)
+		}
 	}
 }

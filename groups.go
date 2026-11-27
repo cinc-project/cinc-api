@@ -139,20 +139,34 @@ func (s *GroupsService) Create(ctx context.Context, name string) (*Response, err
 	return resp, err
 }
 
-// Update replaces a group's members. The path segment is the group's name,
-// taken from Name or, when that is empty, GroupName; the body is emitted in
-// the {groupname, actors:{users,clients,groups}} shape the server requires on
-// PUT. Nil member slices become empty JSON arrays rather than null.
+// Update replaces the named group's members with g's and returns the group
+// as the server echoes it. The body is emitted in the {groupname,
+// actors:{users,clients,groups}} shape the server requires on PUT; nil member
+// slices become empty JSON arrays rather than null. g is not modified.
 //
-// A group with neither field set is an error rather than a PUT to the
-// collection endpoint.
-func (s *GroupsService) Update(ctx context.Context, g *Group) (*Group, *Response, error) {
-	name := g.name()
+// To rename the group, set g.Name or g.GroupName to the new name (either
+// one, so a group read with Get, which carries its name in both, can be
+// renamed by changing one): the server then answers 201 with the new
+// location. A field that is empty or holds the current name keeps it; the two
+// naming different new names is an error.
+func (s *GroupsService) Update(ctx context.Context, name string, g *Group) (*Group, *Response, error) {
 	if name == "" {
-		return nil, nil, errors.New("cinc: group requires a Name or GroupName to update")
+		return nil, nil, errors.New("cinc: Groups.Update needs the group's current name")
 	}
+	newName := name
+	for _, n := range []string{g.Name, g.GroupName} {
+		if n == "" || n == name || n == newName {
+			continue
+		}
+		if newName != name {
+			return nil, nil, fmt.Errorf("cinc: Groups.Update: Name %q and GroupName %q name different new names", g.Name, g.GroupName)
+		}
+		newName = n
+	}
+	// erchef takes the new name from "groupname" only
+	// (oc_chef_group:update_from_ejson), so that is the key sent.
 	body := map[string]any{
-		"groupname": name,
+		"groupname": newName,
 		"actors": map[string]any{
 			"users":   nonNil(g.Users),
 			"clients": nonNil(g.Clients),
@@ -161,17 +175,11 @@ func (s *GroupsService) Update(ctx context.Context, g *Group) (*Group, *Response
 	}
 	updated, resp, err := do[Group](ctx, s.client, "PUT",
 		s.client.orgPath("/groups/"+esc(name)), body)
-	return ptrOrNil(updated, err), resp, err
-}
-
-// name is the group's identifier. Chef identifies a group by "groupname";
-// "name" is a courtesy field carrying the same value that not every server
-// populates, so prefer it but fall back.
-func (g *Group) name() string {
-	if g.Name != "" {
-		return g.Name
+	if err == nil && updated.Name == "" {
+		// erchef echoes the PUT body, which carries no "name".
+		updated.Name = updated.GroupName
 	}
-	return g.GroupName
+	return ptrOrNil(updated, err), resp, err
 }
 
 // Delete removes a group by name.
@@ -252,8 +260,8 @@ func (s *GroupsService) changeMembers(ctx context.Context, group string, kind Me
 	} else {
 		removeMembers(list, sent)
 	}
-	current.Name = group
-	if _, _, err := s.Update(ctx, current); err != nil {
+	current.Name, current.GroupName = "", "" // keep the name: never a rename
+	if _, _, err := s.Update(ctx, group, current); err != nil {
 		return nil, err
 	}
 
