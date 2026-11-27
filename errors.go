@@ -60,13 +60,31 @@ func (e *ErrorResponse) Error() string {
 	if msg == "" {
 		msg = "(no message)"
 	}
-	// A 401 is nearly always a bad key or a skewed clock, and the server's own
-	// message rarely says so. The hint belongs here rather than in Messages,
-	// which reports what the server said.
+	// The hint belongs here rather than in Messages, which reports what the
+	// server said.
 	if e.StatusCode == 401 {
-		msg += " (check the client key and that the local clock is in sync)"
+		msg += unauthorizedHint(e.ServerMessage())
 	}
 	return fmt.Sprintf("cinc: %s %s: %d: %s", e.Method, e.Path, e.StatusCode, msg)
+}
+
+// unauthorizedHint returns advice to follow a 401's server message, or "" when
+// the message already names the cause. erchef and cinc-server-ng name it for
+// an unknown actor ("Ensure that your node_name and client key are correct"),
+// a skewed clock, bad signing headers, and a failed password login. erchef's
+// "Invalid signature for user or client" leaves only the key: the clock is
+// checked first. Any other message, or none, gets the general hint.
+func unauthorizedHint(msg string) string {
+	lower := strings.ToLower(msg)
+	for _, named := range []string{"client key", "clock", "time stamp", "timestamp", "header", "password"} {
+		if strings.Contains(lower, named) {
+			return ""
+		}
+	}
+	if strings.Contains(lower, "invalid signature for user or client") {
+		return " (check that the client key is the one the server has for this client)"
+	}
+	return " (check the client key and that the local clock is in sync)"
 }
 
 // Unwrap maps the status code to a sentinel error for errors.Is.
