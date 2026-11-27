@@ -72,9 +72,13 @@ func (s *UsersService) Create(ctx context.Context, u *User) (*UserCreateResult, 
 
 // Update replaces a user's metadata. Use UserName as the lookup key; other
 // fields are the new values.
-func (s *UsersService) Update(ctx context.Context, u *User) (*User, *Response, error) {
-	updated, resp, err := do[User](ctx, s.client, "PUT", "/users/"+esc(u.UserName), u)
-	return ptrOrNil(updated, err), resp, err
+//
+// The server answers with only the user's URI (unlike clients, orgs and
+// groups, whose PUT echoes the object), so there is nothing to return but
+// the response; Get the user to read back what was stored.
+func (s *UsersService) Update(ctx context.Context, u *User) (*Response, error) {
+	_, resp, err := do[map[string]any](ctx, s.client, "PUT", "/users/"+esc(u.UserName), u)
+	return resp, err
 }
 
 // userKeyFields are the fields a user GET may carry that erchef rejects on a

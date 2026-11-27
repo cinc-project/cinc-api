@@ -70,6 +70,10 @@ file new ones at cinc-project/cinc-server-ng):
 - **cinc-server-ng** accepts and stores `run_list: null` on a node, where a
   real Chef Server is stricter. That is why `run_list` always serializes as
   `[]`.
+- **cinc-server-ng** answers `PUT /users/<name>` with the whole user; erchef
+  sends only `{"uri"}` (`oc_chef_wm_named_user:finalize_update_body`), which
+  is why `Users.Update` returns no `*User`. Client, org and group PUTs echo
+  the object on both.
 - **cinc-server-ng** accepts `POST .../keys` with neither `create_key` nor
   `public_key` (it generates one) and without `expiration_date` (it stores
   `infinity`). erchef rejects both with a 400; `KeyScope.Create` fills them in.
