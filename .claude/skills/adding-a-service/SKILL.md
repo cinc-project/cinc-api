@@ -20,7 +20,7 @@ inventing a new one — the package is small, flat, and idiomatic.
      with `{"uri":...}` — check what the endpoint actually returns before
      promising a value the caller will never get.
    - Use the generic helper `do[T](ctx, c, method, path, body)` for
-     every request. It signs, retries idempotent calls, decodes JSON,
+     every JSON request. It signs, retries idempotent calls, decodes JSON,
      and maps non-2xx responses to `*ErrorResponse`.
    - If the resource has plain Get/Create/Update/Delete/List, the
      `crud[T]` helper in `crud.go` saves boilerplate (see `nodes.go`).
@@ -33,9 +33,7 @@ inventing a new one — the package is small, flat, and idiomatic.
    Wrap every caller-supplied identifier in `esc()` as you interpolate it
    (`orgPath("/nodes/" + esc(name))`). It is the identity function for
    legal Chef names; without it a name can break the signature or walk
-   into another collection. (`esc` arrives with the path-escaping fix; if
-   it is not in the tree yet that change is still in review — escape the
-   segment rather than concatenating raw.)
+   into another collection.
 4. Update the `README.md` Status table in the same PR.
 
 ## Testing the new service

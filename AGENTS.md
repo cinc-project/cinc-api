@@ -32,7 +32,7 @@ commands and PR conventions).
 - For requests outside the harness (path traversal, raw bookshelf
   uploads, etc.) set `srv.Server.Config.Handler` directly.
 - Write tests **first**: red → implement → green. New files should land
-  with 100% line coverage; the package as a whole sits at ~96% and
+  with 100% line coverage; the package as a whole sits at ~97% and
   should stay there or higher.
 - Run `go test ./... -race -count=2` before committing. For coverage
   including the test-only `cinctest` package use
