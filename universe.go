@@ -15,8 +15,8 @@ type UniverseEntry struct {
 // resolution.
 type Universe map[string]map[string]UniverseEntry
 
-// UniverseService accesses the /universe endpoint, which exists both
-// org-scoped and at the top level.
+// UniverseService accesses an organization's /universe endpoint. Chef Server
+// has no top-level /universe.
 type UniverseService struct{ client *Client }
 
 // Get returns the org-scoped universe (/organizations/ORG/universe).
