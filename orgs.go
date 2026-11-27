@@ -11,9 +11,11 @@ type Org struct {
 	GUID     string `json:"guid,omitempty"`
 }
 
-// OrgCreateResult is the response from POST /organizations. The PrivateKey
-// is the generated validator client's RSA key and is returned **only** at
-// creation time — store it before the response is dropped.
+// OrgCreateResult is the response from POST /organizations: the new org's
+// URI, the name of its generated validator client, and that client's
+// server-generated private key (top-level here, where client and user creates
+// embed it in ChefKey). The server keeps no copy: capture it before the
+// response is dropped.
 type OrgCreateResult struct {
 	URI        string `json:"uri,omitempty"`
 	ClientName string `json:"clientname,omitempty"`

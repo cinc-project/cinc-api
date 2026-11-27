@@ -139,6 +139,10 @@ func startTarget(name string, opts server.Options, hc *http.Client) (suite.Targe
 			// Not a server difference: erchef also lets the superuser take
 			// admins off a grant ACE, and this target's admin is the superuser.
 			"acls/revoke-keeps-admins-on-grant": "the admin here is the pivotal superuser, which erchef also exempts from this check",
+			// erchef renames when a PUT body names a different object
+			// (oc_chef_wm_base:update_from_json -> handle_rename, 201 with Location).
+			"clients/rename": "cinc-server-ng v0.22.0 answers a renaming client PUT with 200 and stores the new body under the old name; the old name still resolves and the new one 404s",
+			"users/rename":   "cinc-server-ng v0.22.0 answers a renaming user PUT with 200 and stores the new body under the old name; the old name still resolves and the new one 404s",
 		},
 		Client: func(t *testing.T) *cinc.Client {
 			t.Helper()

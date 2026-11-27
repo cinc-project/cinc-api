@@ -1,6 +1,9 @@
 package cinc
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // SuperuserName is the Chef Server's built-in superuser, "pivotal". Some
 // server-wide operations are reserved to it rather than to any org admin or
@@ -32,13 +35,13 @@ type User struct {
 	PublicKey string `json:"public_key,omitempty"`
 }
 
-// UserCreateResult is the response from POST /users. ChefKey.PrivateKey holds
-// the server-generated private key, which Create asks for unless the User
-// carries a PublicKey. The server keeps no copy: capture it before the
-// response is dropped.
+// UserCreateResult is the response from POST /users: the new user's URI and
+// its "default" key. Unless the User carried a PublicKey, ChefKey.PrivateKey
+// holds the server-generated private key. The server keeps no copy: capture
+// it before the response is dropped.
 type UserCreateResult struct {
 	URI     string  `json:"uri,omitempty"`
-	ChefKey ChefKey `json:"chef_key"`
+	ChefKey ChefKey `json:"chef_key,omitzero"`
 }
 
 // UsersService accesses the top-level /users endpoints.
@@ -70,14 +73,22 @@ func (s *UsersService) Create(ctx context.Context, u *User) (*UserCreateResult, 
 	return ptrOrNil(r, err), resp, err
 }
 
-// Update replaces a user's metadata. Use Username as the lookup key; other
-// fields are the new values.
+// Update replaces the named user's metadata with u's. To rename the user,
+// set u.Username to the new name: the server then answers 201 with the new
+// location. An empty u.Username keeps the current one. u is not modified.
 //
 // The server answers with only the user's URI (unlike clients, orgs and
 // groups, whose PUT echoes the object), so there is nothing to return but
 // the response; Get the user to read back what was stored.
-func (s *UsersService) Update(ctx context.Context, u *User) (*Response, error) {
-	_, resp, err := do[map[string]any](ctx, s.client, "PUT", "/users/"+esc(u.Username), u)
+func (s *UsersService) Update(ctx context.Context, name string, u *User) (*Response, error) {
+	if name == "" {
+		return nil, errors.New("cinc: Users.Update needs the user's current name")
+	}
+	req := *u
+	if req.Username == "" {
+		req.Username = name
+	}
+	_, resp, err := do[map[string]any](ctx, s.client, "PUT", "/users/"+esc(name), &req)
 	return resp, err
 }
 

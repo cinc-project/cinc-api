@@ -27,6 +27,17 @@ type Key struct {
 	Expired bool `json:"expired,omitempty"`
 }
 
+// ChefKey is the "default" key the server embeds as chef_key in its answer to
+// creating a client or user (ClientCreateResult, UserCreateResult).
+// PrivateKey is set only when the server generated the pair.
+type ChefKey struct {
+	Name           string `json:"name,omitempty"`
+	PublicKey      string `json:"public_key,omitempty"`
+	PrivateKey     string `json:"private_key,omitempty"`
+	ExpirationDate string `json:"expiration_date,omitempty"`
+	URI            string `json:"uri,omitempty"`
+}
+
 // KeysService is the entry point for the Chef Server keys API. The same API
 // shape is reachable via two different paths: per-user at /users/USER/keys
 // (not org-scoped) and per-client at /organizations/ORG/clients/CLIENT/keys.
