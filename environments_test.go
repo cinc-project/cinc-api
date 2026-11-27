@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-api/internal/cinctest"
@@ -87,15 +89,19 @@ func TestEnvironments_CookbookVersions(t *testing.T) {
 		Assert: func(t *testing.T, _ *http.Request, body []byte) {
 			var got map[string][]string
 			json.Unmarshal(body, &got)
-			if len(got["run_list"]) != 2 || got["run_list"][0] != "recipe[apache2]" {
-				t.Errorf("POST body = %v", got)
+			// erchef's depsolver splits each item on "@" and "::" only
+			// (chef_wm_depsolver:cookbooks_for_runlist), so recipe[...] is
+			// unwrapped before sending, as chef-client sends bare names.
+			want := []string{"apache2", "nginx::server", "mysql@8.0.0"}
+			if !slices.Equal(got["run_list"], want) {
+				t.Errorf("POST run_list = %q, want %q", got["run_list"], want)
 			}
 		},
 	})
 	c := newTestClient(t, srv.Server)
 
 	cbs, _, err := c.Environments.CookbookVersions(context.Background(), "prod",
-		[]string{"recipe[apache2]", "nginx"})
+		[]string{"recipe[apache2]", "nginx::server", "mysql@8.0.0"})
 	if err != nil {
 		t.Fatalf("CookbookVersions: %v", err)
 	}
@@ -149,5 +155,16 @@ func TestEnvironments_RoleRunList(t *testing.T) {
 	}
 	if len(rl) != 2 || rl[0] != "recipe[apache2]" {
 		t.Fatalf("RoleRunList = %v", rl)
+	}
+}
+
+// The depsolver cannot expand a role: chef-client expands roles into recipes
+// before it asks. A role item is refused before anything is sent.
+func TestEnvironments_CookbookVersions_RefusesRoles(t *testing.T) {
+	srv := cinctest.New(t)
+	c := newTestClient(t, srv.Server)
+	_, _, err := c.Environments.CookbookVersions(context.Background(), "prod", []string{"recipe[a]", "role[web]"})
+	if err == nil || !strings.Contains(err.Error(), "role[web]") {
+		t.Errorf("err = %v, want a refusal naming role[web]", err)
 	}
 }
