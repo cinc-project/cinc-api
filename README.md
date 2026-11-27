@@ -6,6 +6,9 @@ A modern, idiomatic Go client for the Chef Infra / CINC Server API.
 
     go get github.com/cinc-project/cinc-api
 
+Requires Go 1.26 or newer. The module has no dependencies outside the
+standard library.
+
 ## Usage
 
     key, _ := cinc.LoadKeyFile("/etc/chef/client.pem")

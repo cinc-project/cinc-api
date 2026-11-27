@@ -64,7 +64,7 @@ commands and PR conventions).
 ## What the test doubles do not cover
 
 Both suites can be green while the wire contract is wrong. Known gaps, each
-of which has hidden a real bug (all re-checked against cinc-server-ng v0.16.0;
+of which has hidden a real bug (all re-checked against cinc-server-ng v0.22.0;
 file new ones at cinc-project/cinc-server-ng):
 
 - **cinc-server-ng** accepts and stores `run_list: null` on a node, where a
@@ -80,9 +80,6 @@ file new ones at cinc-project/cinc-server-ng):
   cinc-server-ng answers a non-numeric requested version with a 400 whose
   header says `request_version`/`response_version` are the minimum, where
   erchef sends a 406 with both `-1`.
-- **cinc-server-ng** encodes `/_stats` JSON differently: numeric values where
-  erchef sends strings, labels as an array, histograms summarized on the
-  family (cinc-server-ng#243). `stats/get` is a gap there until it is fixed.
 - **Neither server** rejects a cookbook manifest with bare file names
   (`default.rb` instead of `recipes/default.rb`), but chef-client misfiles
   every such entry, so only a converge would show it.

@@ -136,7 +136,6 @@ func startTarget(name string, opts server.Options, hc *http.Client) (suite.Targe
 		StatsUser:     statsUser,
 		StatsPassword: statsPassword,
 		Gaps: map[string]string{
-			"stats/get": "/_stats JSON shape differs from erchef (numeric values, labels array): https://github.com/cinc-project/cinc-server-ng/issues/243",
 			// Not a server difference: erchef also lets the superuser take
 			// admins off a grant ACE, and this target's admin is the superuser.
 			"acls/revoke-keeps-admins-on-grant": "the admin here is the pivotal superuser, which erchef also exempts from this check",
